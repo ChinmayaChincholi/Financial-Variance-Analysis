@@ -1,0 +1,14 @@
+# Runtime dependencies -- these ship inside the packaged desktop app.
+# Pinned to exact versions for reproducibility, since this will
+# eventually be bundled via PyInstaller into the Tauri sidecar.
+#
+# Note: XlsxWriter is required even though no file in analysis/ or
+# ingestion/ writes "import xlsxwriter" directly -- pandas loads it
+# dynamically via pd.ExcelWriter(engine="xlsxwriter") in
+# analysis/export.py. Don't remove it just because a plain import-
+# statement search won't find it.
+
+pandas==3.0.2
+python-dateutil==2.9.0.post0
+XlsxWriter==3.2.9
+pydantic==2.13.5
