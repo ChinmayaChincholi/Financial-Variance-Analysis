@@ -1,4 +1,5 @@
 import {
+  Navigate,
   useNavigate,
 } from "react-router-dom";
 
@@ -9,6 +10,7 @@ import {
 import {
   useAnalysisStore,
 } from "../state/analysisStore";
+
 
 export function SheetSelectionPage() {
   const navigate =
@@ -21,29 +23,43 @@ export function SheetSelectionPage() {
     setSelectedSheet,
   } = useAnalysisStore();
 
-  if (!file) {
-    navigate("/", {
-      replace: true,
-    });
 
-    return null;
+  if (!file) {
+    return (
+      <Navigate
+        to="/"
+        replace
+      />
+    );
   }
+
 
   if (!sheets.length) {
-    navigate("/processing", {
-      replace: true,
-    });
-
-    return null;
+    return (
+      <Navigate
+        to="/processing"
+        replace
+      />
+    );
   }
+
 
   function handleContinue() {
     if (!selectedSheet) {
       return;
     }
 
-    navigate("/processing");
+    /*
+     * selectedSheet is already stored in Zustand.
+     *
+     * ProcessingPage will read it and send it to:
+     * POST /api/dataset/process/stream
+     */
+    navigate(
+      "/processing",
+    );
   }
+
 
   return (
     <main className="app-shell">
@@ -54,46 +70,63 @@ export function SheetSelectionPage() {
         />
 
         <div className="period-list">
-          {sheets.map((sheet) => (
-            <button
-              key={sheet}
-              type="button"
-              className="period-option"
-              onClick={() =>
-                setSelectedSheet(sheet)
-              }
-              style={{
-                borderColor:
-                  selectedSheet === sheet
-                    ? "#3157d5"
-                    : undefined,
-                background:
-                  selectedSheet === sheet
-                    ? "#f5f7ff"
-                    : undefined,
-              }}
-            >
-              <span>{sheet}</span>
+          {sheets.map(
+            (sheet) => (
+              <button
+                key={sheet}
+                type="button"
+                className="period-option"
+                onClick={() =>
+                  setSelectedSheet(
+                    sheet,
+                  )
+                }
+                style={{
+                  borderColor:
+                    selectedSheet ===
+                    sheet
+                      ? "#3157d5"
+                      : undefined,
 
-              <span>
-                {selectedSheet === sheet
-                  ? "Selected"
-                  : "Select"}
-              </span>
-            </button>
-          ))}
+                  background:
+                    selectedSheet ===
+                    sheet
+                      ? "#f5f7ff"
+                      : undefined,
+                }}
+              >
+                <span>
+                  {sheet}
+                </span>
+
+                <span>
+                  {
+                    selectedSheet ===
+                    sheet
+                      ? "Selected"
+                      : "Select"
+                  }
+                </span>
+              </button>
+            ),
+          )}
         </div>
 
         <div
           style={{
-            marginTop: "24px",
+            marginTop:
+              "24px",
           }}
         >
           <button
             type="button"
             className="primary-button"
-            disabled={!selectedSheet}
-            onClick={handleContinue}
+            disabled={
+              !selectedSheet
+            }
+            onClick={
+              handleContinue
+            }
           >
             Continue
           </button>

@@ -9,7 +9,7 @@ point. It only reads the DatasetSession.
 """
 
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
@@ -21,7 +21,6 @@ from ingestion.period_grouping import (
     format_fiscal_year_label,
     group_months_into_fiscal_quarters_structured,
     group_months_into_fiscal_years_structured,
-    month_to_fiscal_quarter,
     parse_month_year_column,
 )
 from ingestion.schema import IngestionResult
@@ -50,7 +49,9 @@ def _json_safe_value(value: Any) -> Any:
 def _dataframe_to_records(
         df: pd.DataFrame,
 ) -> list[dict[str, Any]]:
-    records = df.to_dict(orient="records")
+    records = df.to_dict(
+        orient="records"
+    )
 
     return [
         {
@@ -64,7 +65,9 @@ def _dataframe_to_records(
 def _analysis_result_to_dict(
         result: dict,
 ) -> dict[str, Any]:
-    comparison_view = result["comparison_view"]
+    comparison_view = result[
+        "comparison_view"
+    ]
 
     return {
         "rows": _dataframe_to_records(
@@ -137,7 +140,8 @@ def _complete_quarters(
     )
 
     result: dict[
-        tuple[int, int], list[str]
+        tuple[int, int],
+        list[str],
     ] = {}
 
     for key, columns in structured.items():
@@ -192,7 +196,10 @@ def _complete_years(
 
         if all(
                 parse_month_year_column(column)
-                <= (as_of.year, as_of.month)
+                <= (
+                        as_of.year,
+                        as_of.month,
+                )
                 for column in columns
         ):
             result[fiscal_year] = columns
@@ -211,9 +218,7 @@ def _build_mom_option(
 
     return {
         "id": option_id,
-        "label": (
-            f"{first} → {third}"
-        ),
+        "label": f"{first} → {third}",
         "start_period": first,
         "end_period": third,
     }
@@ -226,13 +231,18 @@ def _build_qoq_option(
     qa_label = format_fiscal_quarter_label(
         *qa_key
     )
+
     qb_label = format_fiscal_quarter_label(
         *qb_key
     )
 
     return {
-        "id": f"{qa_label}__{qb_label}",
-        "label": f"{qa_label} → {qb_label}",
+        "id": (
+            f"{qa_label}__{qb_label}"
+        ),
+        "label": (
+            f"{qa_label} → {qb_label}"
+        ),
         "start_period": qa_label,
         "end_period": qb_label,
     }
@@ -245,13 +255,18 @@ def _build_yoy_option(
     x_label = format_fiscal_year_label(
         year_x
     )
+
     y_label = format_fiscal_year_label(
         year_y
     )
 
     return {
-        "id": f"{x_label}__{y_label}",
-        "label": f"{x_label} → {y_label}",
+        "id": (
+            f"{x_label}__{y_label}"
+        ),
+        "label": (
+            f"{x_label} → {y_label}"
+        ),
         "start_period": x_label,
         "end_period": y_label,
     }
@@ -384,7 +399,9 @@ def _build_mom_views(
         month_cols=months,
     )
 
-    option = _build_mom_option(months)
+    option = _build_mom_option(
+        months
+    )
 
     return {
         option["id"]: _analysis_result_to_dict(
@@ -405,7 +422,8 @@ def _build_qoq_views(
     )
 
     result: dict[
-        str, dict[str, Any]
+        str,
+        dict[str, Any],
     ] = {}
 
     for qa_key in sorted(
@@ -418,14 +436,24 @@ def _build_qoq_views(
         if qb_key not in quarter_groups:
             continue
 
-        qa_months = quarter_groups[qa_key]
-        qb_months = quarter_groups[qb_key]
+        qa_months = quarter_groups[
+            qa_key
+        ]
 
-        qa_label = format_fiscal_quarter_label(
-            *qa_key
+        qb_months = quarter_groups[
+            qb_key
+        ]
+
+        qa_label = (
+            format_fiscal_quarter_label(
+                *qa_key
+            )
         )
-        qb_label = format_fiscal_quarter_label(
-            *qb_key
+
+        qb_label = (
+            format_fiscal_quarter_label(
+                *qb_key
+            )
         )
 
         analysis = run_project_wise_analysis(
@@ -444,10 +472,10 @@ def _build_qoq_views(
             qb_key,
         )
 
-        result[option["id"]] = (
-            _analysis_result_to_dict(
-                analysis
-            )
+        result[
+            option["id"]
+        ] = _analysis_result_to_dict(
+            analysis
         )
 
     return result
@@ -470,7 +498,8 @@ def _build_yoy_views(
     )
 
     result: dict[
-        str, dict[str, Any]
+        str,
+        dict[str, Any],
     ] = {}
 
     for year_x in sorted(
@@ -481,8 +510,13 @@ def _build_yoy_views(
         if year_y not in year_groups:
             continue
 
-        year_x_months = year_groups[year_x]
-        year_y_months = year_groups[year_y]
+        year_x_months = year_groups[
+            year_x
+        ]
+
+        year_y_months = year_groups[
+            year_y
+        ]
 
         year_x_quarters = {
             format_fiscal_quarter_label(
@@ -516,11 +550,16 @@ def _build_yoy_views(
         ):
             continue
 
-        year_x_label = format_fiscal_year_label(
-            year_x
+        year_x_label = (
+            format_fiscal_year_label(
+                year_x
+            )
         )
-        year_y_label = format_fiscal_year_label(
-            year_y
+
+        year_y_label = (
+            format_fiscal_year_label(
+                year_y
+            )
         )
 
         analysis = run_project_wise_analysis(
@@ -541,10 +580,10 @@ def _build_yoy_views(
             year_y,
         )
 
-        result[option["id"]] = (
-            _analysis_result_to_dict(
-                analysis
-            )
+        result[
+            option["id"]
+        ] = _analysis_result_to_dict(
+            analysis
         )
 
     return result
@@ -556,11 +595,6 @@ def _build_metric_analysis(
         month_cols: list[str],
         as_of: date,
 ) -> dict[str, Any]:
-    periods = _build_period_metadata(
-        month_cols,
-        as_of,
-    )
-
     if not month_cols:
         return {
             "unique": None,
@@ -603,7 +637,16 @@ def _build_project_wise(
         revenue_cols: list[str],
         cost_cols: list[str],
         as_of: date,
+        progress_callback: Callable[
+                               [str],
+                               None,
+                           ] | None = None,
 ) -> dict[str, Any]:
+    if progress_callback is not None:
+        progress_callback(
+            "Computing project-wise analysis"
+        )
+
     return {
         "revenue": _build_metric_analysis(
             df,
@@ -627,7 +670,16 @@ def _build_region_wise(
         revenue_cols: list[str],
         cost_cols: list[str],
         as_of: date,
+        progress_callback: Callable[
+                               [str],
+                               None,
+                           ] | None = None,
 ) -> dict[str, Any]:
+    if progress_callback is not None:
+        progress_callback(
+            "Computing region-wise analysis"
+        )
+
     regions = [
         str(region)
         for region in get_available_regions(
@@ -667,9 +719,16 @@ def precompute_dataset(
         sheet_name: str,
         ingestion_result: IngestionResult,
         filename: str,
+        progress_callback: Callable[
+                               [str],
+                               None,
+                           ] | None = None,
 ) -> DatasetSession:
     """
     Load the resolved dataset and compute the entire session.
+
+    progress_callback is called only at real stage boundaries.
+    It does not report fabricated percentage progress.
     """
 
     mapping = ingestion_result.column_mapping
@@ -716,6 +775,7 @@ def precompute_dataset(
             mapping.cost_month_year_cols
         ),
         as_of=as_of,
+        progress_callback=progress_callback,
     )
 
     regions: list[str] = []
@@ -741,6 +801,11 @@ def precompute_dataset(
                 mapping.cost_month_year_cols
             ),
             as_of=as_of,
+            progress_callback=progress_callback,
+        )
+    elif progress_callback is not None:
+        progress_callback(
+            "Computing region-wise analysis"
         )
 
     return DatasetSession(

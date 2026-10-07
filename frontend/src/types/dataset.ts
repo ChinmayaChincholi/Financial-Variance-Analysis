@@ -1,8 +1,15 @@
-export type Scope = "project" | "region";
+export type Scope =
+  | "project"
+  | "region";
 
-export type Metric = "revenue" | "cost";
+export type Metric =
+  | "revenue"
+  | "cost";
 
-export type PeriodType = "MoM" | "QoQ" | "YoY";
+export type PeriodType =
+  | "MoM"
+  | "QoQ"
+  | "YoY";
 
 export interface ColumnMapping {
   project_col: string;
@@ -56,9 +63,18 @@ export interface AnalysisResult {
 
 export interface MetricAnalysis {
   unique: AnalysisResult | null;
-  mom: Record<string, AnalysisResult>;
-  qoq: Record<string, AnalysisResult>;
-  yoy: Record<string, AnalysisResult>;
+  mom: Record<
+    string,
+    AnalysisResult
+  >;
+  qoq: Record<
+    string,
+    AnalysisResult
+  >;
+  yoy: Record<
+    string,
+    AnalysisResult
+  >;
 }
 
 export interface MetricPeriods {
@@ -124,3 +140,33 @@ export interface WorkbookInspectionResponse {
   filename: string;
   sheets: string[];
 }
+
+
+/*
+ * ------------------------------------------------------------
+ * Real processing-stream events
+ * ------------------------------------------------------------
+ *
+ * The backend deliberately does not send fake percentage
+ * progress. It sends only real stage transitions.
+ */
+
+export interface DatasetProgressEvent {
+  type: "progress";
+  stage: string;
+}
+
+export interface DatasetResultEvent {
+  type: "result";
+  data: IngestionResponse;
+}
+
+export interface DatasetErrorEvent {
+  type: "error";
+  message: string;
+}
+
+export type DatasetStreamEvent =
+  | DatasetProgressEvent
+  | DatasetResultEvent
+  | DatasetErrorEvent;
