@@ -1,19 +1,39 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import {
+  useMemo,
+  useState,
+} from "react";
 
-import { BackButton } from "../navigation/BackButton";
-import { resolveDataset } from "../services/api/datasetApi";
-import { useAnalysisStore } from "../state/analysisStore";
-import { getErrorMessage } from "../utils/errors";
+import {
+  useNavigate,
+} from "react-router-dom";
+
+import {
+  PageHeader,
+} from "../navigation/PageHeader";
+
+import {
+  resolveDataset,
+} from "../services/api/datasetApi";
+
+import {
+  useAnalysisStore,
+} from "../state/analysisStore";
+
+import {
+  getErrorMessage,
+} from "../utils/errors";
 
 export function ClarificationPage() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
   const {
     file,
+    selectedSheet,
     clarifications,
     clarificationChoices,
     setClarificationChoice,
+    setClarifications,
     setSession,
     setError,
   } = useAnalysisStore();
@@ -21,31 +41,75 @@ export function ClarificationPage() {
   const [submitting, setSubmitting] =
     useState(false);
 
+  if (!file) {
+    navigate("/", {
+      replace: true,
+    });
+
+    return null;
+  }
+
+  if (!selectedSheet) {
+    navigate("/processing", {
+      replace: true,
+    });
+
+    return null;
+  }
+
   const allFieldsSelected =
-    clarifications.length > 0 &&
-    clarifications.every(
-      (item) =>
-        clarificationChoices[item.field],
-    );
+    useMemo(() => {
+      return clarifications.every(
+        (item) => {
+          const choice =
+            clarificationChoices[
+              item.field
+            ];
+
+          if (item.allow_none) {
+            return (
+              choice !== undefined
+            );
+          }
+
+          return Boolean(choice);
+        },
+      );
+    }, [
+      clarificationChoices,
+      clarifications,
+    ]);
 
   async function handleContinue() {
-    if (!file || !allFieldsSelected) {
+    if (
+      !file ||
+      !selectedSheet ||
+      !allFieldsSelected
+    ) {
       return;
     }
 
     try {
       setSubmitting(true);
+      setError(null);
 
-      const response = await resolveDataset(
-        file,
-        clarificationChoices,
-      );
-
-      if (response.status === "needs_clarification") {
-        setError(
-          "Some columns still need clarification.",
+      const response =
+        await resolveDataset(
+          file,
+          clarificationChoices,
+          selectedSheet,
         );
+
+      if (
+        response.status ===
+        "needs_clarification"
+      ) {
+        setClarifications(
+          response.clarifications ?? [],
+        );
+
         setSubmitting(false);
+
         return;
       }
 
@@ -55,10 +119,16 @@ export function ClarificationPage() {
         );
       }
 
-      setSession(response.session);
+      setSession(
+        response.session,
+      );
+
       navigate("/scope");
     } catch (error) {
-      setError(getErrorMessage(error));
+      setError(
+        getErrorMessage(error),
+      );
+
       setSubmitting(false);
     }
   }
@@ -66,28 +136,30 @@ export function ClarificationPage() {
   return (
     <main className="app-shell">
       <div className="page-container">
-        <div className="simple-topbar">
-          <BackButton fallback="/" />
-        </div>
+        <PageHeader
+          title="Confirm Detected Columns"
+          subtitle="Some dataset fields need your confirmation before analysis can continue."
+        />
 
-        <section className="clarification-page">
-          <h1>Confirm Detected Columns</h1>
-
-          <p className="page-description">
-            Some columns could not be identified
-            confidently. Please confirm the appropriate
-            column for each field.
-          </p>
-
-          <div className="clarification-list">
-            {clarifications.map((clarification) => (
+        <div className="clarification-list">
+          {clarifications.map(
+            (clarification) => (
               <div
                 className="clarification-card"
                 key={clarification.field}
               >
-                <h3>{clarification.field}</h3>
+                <h3>
+                  {clarification.field}
+                </h3>
 
-                <p>{clarification.message}</p>
+                <p
+                  style={{
+                    whiteSpace:
+                      "pre-line",
+                  }}
+                >
+                  {clarification.message}
+                </p>
 
                 <select
                   value={
@@ -103,37 +175,50 @@ export function ClarificationPage() {
                   }
                 >
                   <option value="">
-                    Select a column
+                    Select an option
                   </option>
 
                   {clarification.candidates.map(
                     (candidate) => (
                       <option
-                        key={candidate.column}
-                        value={candidate.column}
+                        key={
+                          `${clarification.field}-${candidate.column}`
+                        }
+                        value={
+                          candidate.column
+                        }
                       >
                         {candidate.column}
                       </option>
                     ),
                   )}
+
+                  {clarification.allow_none && (
+                    <option value="__none__">
+                      No Region column
+                    </option>
+                  )}
                 </select>
               </div>
-            ))}
-          </div>
+            ),
+          )}
+        </div>
 
-          <button
-            type="button"
-            className="primary-button"
-            disabled={
-              !allFieldsSelected || submitting
-            }
-            onClick={handleContinue}
-          >
-            {submitting
-              ? "Processing..."
-              : "Confirm and Continue"}
-          </button>
-        </section>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={
+            !allFieldsSelected ||
+            submitting
+          }
+          onClick={
+            handleContinue
+          }
+        >
+          {submitting
+            ? "Processing..."
+            : "Confirm and Continue"}
+        </button>
       </div>
     </main>
   );

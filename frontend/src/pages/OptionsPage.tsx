@@ -1,122 +1,266 @@
-import { BarChart3, CircleDollarSign } from "lucide-react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  BarChart3,
+  CircleDollarSign,
+} from "lucide-react";
 
-import { AnalysisCard } from "../components/AnalysisCard";
-import { PageHeader } from "../navigation/PageHeader";
+import {
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+
+import {
+  AnalysisCard,
+} from "../components/AnalysisCard";
+
+import {
+  PageHeader,
+} from "../navigation/PageHeader";
+
+import {
+  useAnalysisStore,
+} from "../state/analysisStore";
+
 import type {
   Metric,
   Scope,
 } from "../types/dataset";
 
 export function OptionsPage() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
   const {
     scope,
-    metric,
     region,
   } = useParams<{
     scope: Scope;
-    metric: Metric;
     region?: string;
   }>();
+
+  const session =
+    useAnalysisStore(
+      (state) => state.session,
+    );
+
+  if (!session) {
+    navigate("/", {
+      replace: true,
+    });
+
+    return null;
+  }
 
   if (
     scope !== "project" &&
     scope !== "region"
   ) {
-    navigate("/scope");
+    navigate("/scope", {
+      replace: true,
+    });
+
     return null;
   }
+
+  const decodedRegion =
+    region
+      ? decodeURIComponent(region)
+      : undefined;
 
   if (
-    metric !== "revenue" &&
-    metric !== "cost"
+    scope === "region" &&
+    !decodedRegion
   ) {
-    navigate("/scope");
+    navigate("/regions", {
+      replace: true,
+    });
+
     return null;
   }
 
-  const title =
-    metric === "revenue"
-      ? "Revenue Analysis"
-      : "Cost Analysis";
+  const metricAnalysis =
+    (
+      metric: Metric,
+    ) =>
+      scope === "region"
+        ? session.regionWise[
+            decodedRegion!
+          ]?.[metric]
+        : session.projectWise[
+            metric
+          ];
+
+  const revenue =
+    metricAnalysis("revenue");
+
+  const cost =
+    metricAnalysis("cost");
+
+  if (!revenue && !cost) {
+    return (
+      <main className="app-shell">
+        <div className="page-container">
+          <PageHeader
+            title="No Analysis Data"
+          />
+
+          <div className="empty-state">
+            No Revenue or Cost data
+            is available for this
+            selection.
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const prefix =
+    scope === "region"
+      ? `/options/region/${encodeURIComponent(
+          decodedRegion!,
+        )}`
+      : "/options/project";
+
+  const analysisPrefix =
+    scope === "region"
+      ? `/analysis-options/region/${encodeURIComponent(
+          decodedRegion!,
+        )}`
+      : "/analysis-options/project";
 
   const scopeLabel =
-    scope === "project"
-      ? "Project-wise"
-      : region
-        ? region
-        : "Region-wise";
+    scope === "region"
+      ? `${decodedRegion} Region-wise`
+      : "Project-wise";
 
-  const basePath = region
-    ? `/options/region/${encodeURIComponent(region)}/${metric}`
-    : `/options/${scope}/${metric}`;
+  const revenueAvailable =
+    Boolean(revenue?.unique);
+
+  const costAvailable =
+    Boolean(cost?.unique);
+
+  const revenueAnalysisAvailable =
+    Boolean(
+      revenue &&
+        (
+          revenue.mom &&
+          Object.keys(
+            revenue.mom,
+          ).length
+        ) ||
+        (
+          revenue.qoq &&
+          Object.keys(
+            revenue.qoq,
+          ).length
+        ) ||
+        (
+          revenue.yoy &&
+          Object.keys(
+            revenue.yoy,
+          ).length
+        ),
+    );
+
+  const costAnalysisAvailable =
+    Boolean(
+      cost &&
+        (
+          cost.mom &&
+          Object.keys(
+            cost.mom,
+          ).length
+        ) ||
+        (
+          cost.qoq &&
+          Object.keys(
+            cost.qoq,
+          ).length
+        ) ||
+        (
+          cost.yoy &&
+          Object.keys(
+            cost.yoy,
+          ).length
+        ),
+    );
 
   return (
     <main className="app-shell">
       <div className="page-container">
         <PageHeader
-          title={title}
-          subtitle={`${scopeLabel} ${metric} analysis`}
+          title={`${scopeLabel} Analysis`}
+          subtitle="Choose the revenue/cost view you want to open."
         />
 
         <div className="card-grid">
           <AnalysisCard
-            title="View Unique Projects"
-            description="View the unique projects and their aggregated values."
-            icon={<BarChart3 size={24} />}
-            onClick={() => {
-              if (region) {
-                navigate(
-                  `/unique/region/${encodeURIComponent(region)}/${metric}`,
-                );
-              } else {
-                navigate(
-                  `/unique/${scope}/${metric}`,
-                );
-              }
-            }}
-          />
-
-          <AnalysisCard
-            title="Month-on-Month Analysis"
-            description="Compare monthly values and identify month-to-month variations."
-            icon={<BarChart3 size={24} />}
+            title="View Unique Projects & Revenue"
+            description="View aggregated revenue for each unique project."
+            icon={
+              <BarChart3
+                size={24}
+              />
+            }
+            disabled={
+              !revenueAvailable
+            }
             onClick={() =>
               navigate(
-                `${basePath.replace(
-                  "/options/",
-                  "/periods/",
-                )}/MoM`,
+                `${prefix}/unique/revenue`,
               )
             }
           />
 
           <AnalysisCard
-            title="Quarter-on-Quarter Analysis"
-            description="Compare consecutive quarters and their variations."
-            icon={<BarChart3 size={24} />}
+            title="View Unique Projects & Cost"
+            description="View aggregated cost for each unique project."
+            icon={
+              <BarChart3
+                size={24}
+              />
+            }
+            disabled={
+              !costAvailable
+            }
             onClick={() =>
               navigate(
-                `${basePath.replace(
-                  "/options/",
-                  "/periods/",
-                )}/QoQ`,
+                `${prefix}/unique/cost`,
               )
             }
           />
 
           <AnalysisCard
-            title="Year-on-Year Analysis"
-            description="Compare yearly values and identify annual variations."
-            icon={<CircleDollarSign size={24} />}
+            title="Analysis by Revenue"
+            description="Compare revenue month-on-month, quarter-on-quarter or year-on-year."
+            icon={
+              <BarChart3
+                size={24}
+              />
+            }
+            disabled={
+              !revenueAnalysisAvailable
+            }
             onClick={() =>
               navigate(
-                `${basePath.replace(
-                  "/options/",
-                  "/periods/",
-                )}/YoY`,
+                `${analysisPrefix}/revenue`,
+              )
+            }
+          />
+
+          <AnalysisCard
+            title="Analysis by Cost"
+            description="Compare cost month-on-month, quarter-on-quarter or year-on-year."
+            icon={
+              <CircleDollarSign
+                size={24}
+              />
+            }
+            disabled={
+              !costAnalysisAvailable
+            }
+            onClick={() =>
+              navigate(
+                `${analysisPrefix}/cost`,
               )
             }
           />

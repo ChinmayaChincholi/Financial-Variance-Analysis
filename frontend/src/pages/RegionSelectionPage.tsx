@@ -1,18 +1,33 @@
-import { useNavigate } from "react-router-dom";
+import {
+  useNavigate,
+} from "react-router-dom";
 
-import { RegionCard } from "../components/RegionCard";
-import { PageHeader } from "../navigation/PageHeader";
-import { useAnalysisStore } from "../state/analysisStore";
+import {
+  RegionCard,
+} from "../components/RegionCard";
+
+import {
+  PageHeader,
+} from "../navigation/PageHeader";
+
+import {
+  useAnalysisStore,
+} from "../state/analysisStore";
 
 export function RegionSelectionPage() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
-  const session = useAnalysisStore(
-    (state) => state.session,
-  );
+  const session =
+    useAnalysisStore(
+      (state) => state.session,
+    );
 
   if (!session) {
-    navigate("/");
+    navigate("/", {
+      replace: true,
+    });
+
     return null;
   }
 
@@ -24,23 +39,29 @@ export function RegionSelectionPage() {
           subtitle="Choose a region to continue with region-wise analysis."
         />
 
-        {session.regions.length === 0 ? (
+        {session.regions.length ===
+        0 ? (
           <div className="empty-state">
-            No regions were detected in this dataset.
+            No regions were detected
+            in this dataset.
           </div>
         ) : (
           <div className="region-grid">
-            {session.regions.map((region) => (
-              <RegionCard
-                key={region}
-                region={region}
-                onClick={() =>
-                  navigate(
-                    `/options/region/${encodeURIComponent(region)}/revenue`,
-                  )
-                }
-              />
-            ))}
+            {session.regions.map(
+              (region) => (
+                <RegionCard
+                  key={region}
+                  region={region}
+                  onClick={() =>
+                    navigate(
+                      `/options/region/${encodeURIComponent(
+                        region,
+                      )}`,
+                    )
+                  }
+                />
+              ),
+            )}
           </div>
         )}
       </div>

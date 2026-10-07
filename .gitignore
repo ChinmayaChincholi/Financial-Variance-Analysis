@@ -1,19 +1,140 @@
-# Virtual environment
-venv/
-env/
+# ============================================================
+# FRONTEND
+# ============================================================
+
+# Installed npm dependencies
+frontend/node_modules/
+
+# Vite production build
+frontend/dist/
+
+# Vite cache
+frontend/.vite/
+
+# Frontend environment files
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+
+# ============================================================
+# BACKEND / PYTHON
+# ============================================================
+
+# Python virtual environments
+backend/.venv/
+backend/venv/
+backend/env/
+backend/.env/
 
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Pytest
 .pytest_cache/
 
-# OS-specific
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Type checking / linting caches
+.mypy_cache/
+.pyre/
+.ruff_cache/
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+
+# ============================================================
+# ENVIRONMENT / SECRETS
+# ============================================================
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Keep example environment files tracked
+!.env.example
+!frontend/.env.example
+!backend/.env.example
+
+
+# ============================================================
+# LOCAL DATA
+# ============================================================
+
+# Confidential/local datasets
+data/
+local_data/
+
+# Uploaded temporary files
+uploads/
+backend/uploads/
+
+# Generated exports
+exports/
+backend/exports/
+
+# Temporary processing files
+tmp/
+temp/
+
+
+# ============================================================
+# LOGS
+# ============================================================
+
+*.log
+logs/
+
+
+# ============================================================
+# OS FILES
+# ============================================================
+
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# IDE
+
+# ============================================================
+# IDE / EDITOR
+# ============================================================
+
 .vscode/
 .idea/
+*.iml
 
-# Environment variables / secrets (if any get added later)
-.env
+# VS Code local history
+.history/
+
+
+# ============================================================
+# NODE / NPM
+# ============================================================
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Optional package manager caches
+.npm/
+
+
+# ============================================================
+# BUILD / TOOLING OUTPUT
+# ============================================================
+
+*.tsbuildinfo

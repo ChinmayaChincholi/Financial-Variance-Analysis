@@ -1,7 +1,18 @@
-import { Download } from "lucide-react";
+import {
+  useState,
+} from "react";
 
-import type { AnalysisResult } from "../types/dataset";
-import { exportAnalysisToExcel } from "../services/api/exportApi";
+import {
+  Download,
+} from "lucide-react";
+
+import type {
+  AnalysisResult,
+} from "../types/dataset";
+
+import {
+  exportAnalysisToExcel,
+} from "../services/api/exportApi";
 
 interface ExportButtonProps {
   result: AnalysisResult;
@@ -12,18 +23,52 @@ export function ExportButton({
   result,
   filename,
 }: ExportButtonProps) {
-  function handleExport() {
-    exportAnalysisToExcel(result, filename);
+  const [exporting, setExporting] =
+    useState(false);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  async function handleExport() {
+    try {
+      setExporting(true);
+      setError(null);
+
+      await exportAnalysisToExcel(
+        result,
+        filename,
+      );
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not export the analysis.",
+      );
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
-    <button
-      type="button"
-      className="secondary-button"
-      onClick={handleExport}
-    >
-      <Download size={17} />
-      Export to Excel
-    </button>
+    <div>
+      <button
+        type="button"
+        className="secondary-button"
+        onClick={handleExport}
+        disabled={exporting}
+      >
+        <Download size={17} />
+
+        {exporting
+          ? "Exporting..."
+          : "Export to Excel"}
+      </button>
+
+      {error && (
+        <div className="error-message">
+          {error}
+        </div>
+      )}
+    </div>
   );
 }

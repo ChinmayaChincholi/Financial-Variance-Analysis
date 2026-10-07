@@ -1,8 +1,20 @@
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 
-import { PeriodSelector } from "../components/PeriodSelector";
-import { PageHeader } from "../navigation/PageHeader";
-import { useAnalysisStore } from "../state/analysisStore";
+import {
+  PeriodSelector,
+} from "../components/PeriodSelector";
+
+import {
+  PageHeader,
+} from "../navigation/PageHeader";
+
+import {
+  useAnalysisStore,
+} from "../state/analysisStore";
+
 import type {
   Metric,
   PeriodType,
@@ -10,7 +22,8 @@ import type {
 } from "../types/dataset";
 
 export function PeriodSelectionPage() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
   const {
     scope,
@@ -24,12 +37,16 @@ export function PeriodSelectionPage() {
     region?: string;
   }>();
 
-  const session = useAnalysisStore(
-    (state) => state.session,
-  );
+  const session =
+    useAnalysisStore(
+      (state) => state.session,
+    );
 
   if (!session) {
-    navigate("/");
+    navigate("/", {
+      replace: true,
+    });
+
     return null;
   }
 
@@ -42,19 +59,27 @@ export function PeriodSelectionPage() {
       period !== "QoQ" &&
       period !== "YoY")
   ) {
-    navigate("/scope");
+    navigate("/scope", {
+      replace: true,
+    });
+
     return null;
   }
 
-  const periodKey =
-    period.toLowerCase() as "mom" | "qoq" | "yoy";
+  const decodedRegion =
+    region
+      ? decodeURIComponent(region)
+      : undefined;
 
   const options =
-    session.periods[metric][periodKey];
-
-  const decodedRegion = region
-    ? decodeURIComponent(region)
-    : undefined;
+    session.periods[
+      metric
+    ][
+      period.toLowerCase() as
+        | "mom"
+        | "qoq"
+        | "yoy"
+    ];
 
   const title =
     period === "MoM"
@@ -63,13 +88,25 @@ export function PeriodSelectionPage() {
         ? "Quarter-on-Quarter Analysis"
         : "Year-on-Year Analysis";
 
-  function handleSelect(optionId: string) {
-    const encodedRegion = decodedRegion
-      ? `/${encodeURIComponent(decodedRegion)}`
-      : "";
+  function handleSelect(
+    optionId: string,
+  ) {
+    if (scope === "region") {
+      navigate(
+        `/analysis/region/${encodeURIComponent(
+          decodedRegion!,
+        )}/${metric}/${period}/${encodeURIComponent(
+          optionId,
+        )}`,
+      );
+
+      return;
+    }
 
     navigate(
-      `/analysis/${scope}/${metric}/${period}/${encodeURIComponent(optionId)}${encodedRegion}`,
+      `/analysis/project/${metric}/${period}/${encodeURIComponent(
+        optionId,
+      )}`,
     );
   }
 
@@ -84,7 +121,9 @@ export function PeriodSelectionPage() {
         <PeriodSelector
           options={options}
           onSelect={(option) =>
-            handleSelect(option.id)
+            handleSelect(
+              option.id,
+            )
           }
         />
       </div>

@@ -1,18 +1,19 @@
 """
-Top-level entry point for the NLP/Ingestion layer.
+Top-level ingestion pipeline.
 
-Wires together: header-row detection -> column profiling -> Project/
-Region candidate scoring -> Month-Year metric-block resolution -> a
-single ColumnMapping (schema.py), OR a list of ClarificationRequests to
-surface on the "Confirm Detected Columns" screen (see the UX discussion
-in this project's design notes -- automatic detection is always a
-pre-filled default the user can see and override, never a silent final
-answer).
+Responsibilities:
+- detect the header row
+- profile columns
+- resolve Project Name
+- resolve optional Region
+- resolve Revenue/Cost Month-Year blocks
+- return a complete ColumnMapping
+- support a second pass after user clarification
 
-This module assumes the caller has already resolved which SHEET to use
-(the doc's multi-sheet-selection UI is a separate, earlier step -- by
-the time run_ingestion() is called, there is exactly one sheet).
+This module does not perform financial analysis.
 """
+
+import re
 
 import pandas as pd
 
@@ -37,6 +38,10 @@ from ingestion.schema import (
 
 HEADER_ROW_CONFIDENCE_FLOOR = 0.55
 
+NO_REGION_CHOICE = "__none__"
+
+METRIC_BLOCK_FIELD_PREFIX = "metric_block_"
+
 
 def _to_candidate_out(candidates) -> list[ColumnCandidateOut]:
     return [
@@ -53,85 +58,129 @@ def _to_candidate_out(candidates) -> list[ColumnCandidateOut]:
 def _block_label(columns: list[str]) -> str:
     if len(columns) == 1:
         return columns[0]
-    return f"{columns[0]} .. {columns[-1]} ({len(columns)} columns)"
+
+    return (
+        f"{columns[0]} .. {columns[-1]} "
+        f"({len(columns)} columns)"
+    )
 
 
-def run_ingestion(
-        path: str,
-        sheet_name: str,
-        weights: ScoringWeights = ScoringWeights(),
-) -> IngestionResult:
-    """
-    Runs the full ingestion pipeline against one sheet of an uploaded
-    Excel file and returns either a resolved ColumnMapping or the set of
-    clarifications needed to build one.
-
-    Parameters
-    ----------
-    path : path to the uploaded .xlsx file.
-    sheet_name : the single sheet to ingest (already chosen by the
-        multi-sheet-selection step upstream, if the workbook had more
-        than one sheet).
-    weights : scoring constants (see column_scoring.ScoringWeights).
-    """
-    raw = pd.read_excel(path, sheet_name=sheet_name, header=None)
-    header_result = detect_header_row(raw)
-
-    if header_result.confidence < HEADER_ROW_CONFIDENCE_FLOOR:
-        return IngestionResult(
-            status="needs_clarification",
-            clarifications=[
-                ClarificationRequest(
-                    field="header_row",
-                    message=(
-                        "Couldn't confidently identify which row holds your column "
-                        "headers. Please pick the correct row."
-                    ),
-                    candidates=[
-                        ColumnCandidateOut(
-                            column=f"Row {r['row_index']}",
-                            score=r["score"],
-                            sample_values=r["preview"],
-                        )
-                        for r in header_result.candidate_rows[:5]
-                    ],
-                )
-            ],
-            header_row_index=header_result.header_row_index,
-            header_row_confidence=header_result.confidence,
+def _validate_column_choice(
+        df: pd.DataFrame,
+        field: str,
+        chosen_column: str,
+) -> str:
+    if chosen_column not in df.columns:
+        raise ValueError(
+            f"The selected column '{chosen_column}' for "
+            f"{field} does not exist in the dataset."
         )
 
-    df = pd.read_excel(
-        path,
-        sheet_name=sheet_name,
-        header=header_result.header_row_index,
+    return chosen_column
+
+
+def _parse_header_choice(value: str) -> int:
+    """
+    Frontend sends human-readable values such as:
+
+        Row 1
+        Row 2
+
+    Internally header indexes remain zero-based.
+    """
+
+    match = re.fullmatch(
+        r"\s*Row\s+(\d+)\s*",
+        value,
+        flags=re.IGNORECASE,
     )
 
-    return run_ingestion_on_dataframe(
-        df,
-        weights=weights,
-        header_row_index=header_result.header_row_index,
-        header_row_confidence=header_result.confidence,
+    if match:
+        row_number = int(match.group(1))
+
+        if row_number < 1:
+            raise ValueError(
+                "Header row selection must start at Row 1."
+            )
+
+        return row_number - 1
+
+    if value.strip().isdigit():
+        row_number = int(value.strip())
+
+        if row_number < 0:
+            raise ValueError(
+                "Invalid header row selection."
+            )
+
+        return row_number
+
+    raise ValueError(
+        f"Invalid header row selection '{value}'."
     )
 
 
-def run_ingestion_on_dataframe(
-        df: pd.DataFrame,
-        weights: ScoringWeights = ScoringWeights(),
-        header_row_index: int | None = None,
-        header_row_confidence: float | None = None,
-) -> IngestionResult:
-    """
-    Same as run_ingestion(), but takes an already-loaded DataFrame with
-    the correct header applied -- useful for testing, and for the case
-    where header-row selection was already resolved via user
-    clarification on a previous call.
-    """
-    df = drop_placeholder_or_empty_columns(df)
-    profiles = profile_columns(df)
+def _build_metric_clarifications(
+        unresolved_blocks,
+) -> list[ClarificationRequest]:
     clarifications: list[ClarificationRequest] = []
 
-    # --- Project Name ---
+    for index, block in enumerate(unresolved_blocks):
+        label = _block_label(block.columns)
+
+        clarifications.append(
+            ClarificationRequest(
+                field=f"{METRIC_BLOCK_FIELD_PREFIX}{index}",
+                message=(
+                    f"Which metric does this Month-Year "
+                    f"column block represent?\n\n{label}"
+                ),
+                candidates=[
+                    ColumnCandidateOut(
+                        column="Revenue",
+                        score=0.0,
+                        reasons=[],
+                        sample_values=[],
+                    ),
+                    ColumnCandidateOut(
+                        column="Cost",
+                        score=0.0,
+                        reasons=[],
+                        sample_values=[],
+                    ),
+                ],
+                allow_none=False,
+            )
+        )
+
+    return clarifications
+
+
+def _resolve_dataframe(
+        df: pd.DataFrame,
+        choices: dict[str, str] | None = None,
+        header_row_index: int | None = None,
+        header_row_confidence: float | None = None,
+        weights: ScoringWeights = ScoringWeights(),
+) -> IngestionResult:
+    """
+    Resolve one already-headered DataFrame.
+
+    `choices` contains user decisions from the frontend.
+    """
+
+    choices = choices or {}
+
+    df = drop_placeholder_or_empty_columns(df)
+
+    profiles = profile_columns(df)
+
+    clarifications: list[ClarificationRequest] = []
+
+    # ---------------------------------------------------------
+    # PROJECT NAME
+    # ---------------------------------------------------------
+
     project_scores = score_project_candidates(
         profiles,
         df,
@@ -144,17 +193,33 @@ def run_ingestion_on_dataframe(
         weights=weights,
     )
 
-    if project_resolution.needs_clarification:
+    if "project_name" in choices:
+        project_col = _validate_column_choice(
+            df,
+            "Project Name",
+            choices["project_name"],
+        )
+    elif project_resolution.resolved_column is not None:
+        project_col = project_resolution.resolved_column
+    else:
         clarifications.append(
             ClarificationRequest(
                 field="project_name",
-                message=project_resolution.message,
-                candidates=_to_candidate_out(project_resolution.candidates),
+                message=(
+                        project_resolution.message
+                        or "Please select the Project Name column."
+                ),
+                candidates=_to_candidate_out(
+                    project_resolution.candidates
+                ),
             )
         )
+        project_col = None
 
-    # --- Region (optional field -- absence is not itself a clarification;
-    # only genuine AMBIGUITY between multiple plausible columns is) ---
+    # ---------------------------------------------------------
+    # REGION
+    # ---------------------------------------------------------
+
     region_scores = score_region_candidates(
         profiles,
         weights=weights,
@@ -168,46 +233,92 @@ def run_ingestion_on_dataframe(
 
     region_col: str | None
 
-    if region_resolution.resolved_column is not None:
+    if choices.get("region") == NO_REGION_CHOICE:
+        region_col = None
+
+    elif "region" in choices:
+        region_col = _validate_column_choice(
+            df,
+            "Region",
+            choices["region"],
+        )
+
+    elif region_resolution.resolved_column is not None:
         region_col = region_resolution.resolved_column
 
     elif region_scores and region_resolution.needs_clarification:
-        # There WERE candidates, just not a confident/unambiguous one --
-        # surface it. A dataset with literally no region-like column at
-        # all (empty region_scores) is fine; region_col simply stays None.
         clarifications.append(
             ClarificationRequest(
                 field="region",
-                message=region_resolution.message,
-                candidates=_to_candidate_out(region_resolution.candidates),
+                message=(
+                        region_resolution.message
+                        or "Please select the Region column."
+                ),
+                candidates=_to_candidate_out(
+                    region_resolution.candidates
+                ),
+                allow_none=True,
             )
         )
         region_col = None
 
     else:
+        # No region-like column exists.
+        # Region is optional, so this is valid.
         region_col = None
 
-    # --- Revenue / Cost Month-Year blocks ---
-    metric_resolution = resolve_metric_blocks(profiles)
+    # ---------------------------------------------------------
+    # REVENUE / COST MONTH-YEAR BLOCKS
+    # ---------------------------------------------------------
 
-    if metric_resolution.needs_clarification:
-        block_candidates = [
-            ColumnCandidateOut(
-                column=_block_label(b.columns),
-                score=0.0,
-                reasons=b.reasons,
-                sample_values=[],
-            )
-            for b in metric_resolution.unresolved_blocks
-        ]
+    metric_resolution = resolve_metric_blocks(
+        profiles
+    )
 
-        clarifications.append(
-            ClarificationRequest(
-                field="revenue_or_cost_month_year",
-                message=metric_resolution.message,
-                candidates=block_candidates,
-            )
+    revenue_cols = list(
+        metric_resolution.revenue_cols
+    )
+
+    cost_cols = list(
+        metric_resolution.cost_cols
+    )
+
+    for index, block in enumerate(
+            metric_resolution.unresolved_blocks
+    ):
+        field = (
+            f"{METRIC_BLOCK_FIELD_PREFIX}{index}"
         )
+
+        choice = choices.get(field)
+
+        if choice is None:
+            clarifications.extend(
+                _build_metric_clarifications(
+                    [block]
+                )
+            )
+            continue
+
+        normalized_choice = choice.strip().lower()
+
+        if normalized_choice not in {
+            "revenue",
+            "cost",
+        }:
+            raise ValueError(
+                f"Invalid metric choice '{choice}' "
+                f"for {field}. Expected Revenue or Cost."
+            )
+
+        if normalized_choice == "revenue":
+            revenue_cols.extend(block.columns)
+        else:
+            cost_cols.extend(block.columns)
+
+    # ---------------------------------------------------------
+    # FINAL VALIDATION
+    # ---------------------------------------------------------
 
     if clarifications:
         return IngestionResult(
@@ -217,11 +328,31 @@ def run_ingestion_on_dataframe(
             header_row_confidence=header_row_confidence,
         )
 
+    if project_col is None:
+        raise ValueError(
+            "A Project Name column is required."
+        )
+
+    if not revenue_cols and not cost_cols:
+        raise ValueError(
+            "No Revenue or Cost Month-Year columns "
+            "could be resolved from the dataset."
+        )
+
+    overlap = set(revenue_cols) & set(cost_cols)
+
+    if overlap:
+        raise ValueError(
+            "The following Month-Year columns were assigned "
+            f"to both Revenue and Cost: {sorted(overlap)}"
+        )
+
+    # Preserve the actual dataset column names.
     mapping = ColumnMapping(
-        project_col=project_resolution.resolved_column,
+        project_col=project_col,
         region_col=region_col,
-        revenue_month_year_cols=metric_resolution.revenue_cols,
-        cost_month_year_cols=metric_resolution.cost_cols,
+        revenue_month_year_cols=revenue_cols,
+        cost_month_year_cols=cost_cols,
     )
 
     return IngestionResult(
@@ -232,24 +363,182 @@ def run_ingestion_on_dataframe(
     )
 
 
+def run_ingestion(
+        path: str,
+        sheet_name: str,
+        weights: ScoringWeights = ScoringWeights(),
+) -> IngestionResult:
+    """
+    Run automatic ingestion against one workbook sheet.
+    """
+
+    raw = pd.read_excel(
+        path,
+        sheet_name=sheet_name,
+        header=None,
+    )
+
+    header_result = detect_header_row(raw)
+
+    if (
+            header_result.confidence
+            < HEADER_ROW_CONFIDENCE_FLOOR
+    ):
+        return IngestionResult(
+            status="needs_clarification",
+            clarifications=[
+                ClarificationRequest(
+                    field="header_row",
+                    message=(
+                        "Couldn't confidently identify which "
+                        "row contains the column headers. "
+                        "Please select the correct row."
+                    ),
+                    candidates=[
+                        ColumnCandidateOut(
+                            column=(
+                                f"Row {r['row_index'] + 1}"
+                            ),
+                            score=r["score"],
+                            reasons=[],
+                            sample_values=r["preview"],
+                        )
+                        for r in header_result.candidate_rows[
+                            :5
+                        ]
+                    ],
+                )
+            ],
+            header_row_index=(
+                header_result.header_row_index
+            ),
+            header_row_confidence=(
+                header_result.confidence
+            ),
+        )
+
+    df = pd.read_excel(
+        path,
+        sheet_name=sheet_name,
+        header=header_result.header_row_index,
+    )
+
+    return _resolve_dataframe(
+        df,
+        header_row_index=(
+            header_result.header_row_index
+        ),
+        header_row_confidence=(
+            header_result.confidence
+        ),
+        weights=weights,
+    )
+
+
+def run_ingestion_on_dataframe(
+        df: pd.DataFrame,
+        weights: ScoringWeights = ScoringWeights(),
+        header_row_index: int | None = None,
+        header_row_confidence: float | None = None,
+) -> IngestionResult:
+    """
+    Run ingestion against an already-headered DataFrame.
+
+    Primarily useful for tests and clarification workflows.
+    """
+
+    return _resolve_dataframe(
+        df,
+        header_row_index=header_row_index,
+        header_row_confidence=header_row_confidence,
+        weights=weights,
+    )
+
+
+def resolve_ingestion_with_choices(
+        path: str,
+        sheet_name: str,
+        choices: dict[str, str],
+        weights: ScoringWeights = ScoringWeights(),
+) -> IngestionResult:
+    """
+    Re-run ingestion using explicit decisions made by the user.
+
+    This is the authoritative second pass used by the frontend
+    clarification page.
+    """
+
+    raw = pd.read_excel(
+        path,
+        sheet_name=sheet_name,
+        header=None,
+    )
+
+    if "header_row" in choices:
+        header_row_index = _parse_header_choice(
+            choices["header_row"]
+        )
+
+        if (
+                header_row_index < 0
+                or header_row_index >= len(raw)
+        ):
+            raise ValueError(
+                f"Selected header row "
+                f"{header_row_index + 1} is outside "
+                f"the worksheet."
+            )
+
+        header_row_confidence = None
+
+    else:
+        header_result = detect_header_row(raw)
+
+        if (
+                header_result.confidence
+                < HEADER_ROW_CONFIDENCE_FLOOR
+        ):
+            return run_ingestion(
+                path,
+                sheet_name,
+                weights=weights,
+            )
+
+        header_row_index = (
+            header_result.header_row_index
+        )
+        header_row_confidence = (
+            header_result.confidence
+        )
+
+    df = pd.read_excel(
+        path,
+        sheet_name=sheet_name,
+        header=header_row_index,
+    )
+
+    return _resolve_dataframe(
+        df,
+        choices=choices,
+        header_row_index=header_row_index,
+        header_row_confidence=header_row_confidence,
+        weights=weights,
+    )
+
+
 def apply_user_choice(
         result: IngestionResult,
         field: str,
         chosen_column: str,
 ) -> None:
     """
-    Helper for the UI layer: once the user answers a clarification for
-    `field`, call this to remove that clarification from the result.
-    This does NOT re-run the pipeline -- it's a thin convenience for
-    building the final ColumnMapping once all clarifications for a
-    dataset have been answered in the UI layer, which is expected to
-    accumulate answers and construct the ColumnMapping directly once
-    every field is resolved (project_col, region_col,
-    revenue_month_year_cols, cost_month_year_cols).
+    Backward-compatible helper retained for existing tests/callers.
     """
+
     result.clarifications = [
-        c for c in result.clarifications
-        if c.field != field
+        clarification
+        for clarification in result.clarifications
+        if clarification.field != field
     ]
 
     if not result.clarifications:

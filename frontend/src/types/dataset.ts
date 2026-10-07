@@ -2,7 +2,7 @@ export type Scope = "project" | "region";
 
 export type Metric = "revenue" | "cost";
 
-export type PeriodType = "unique" | "MoM" | "QoQ" | "YoY";
+export type PeriodType = "MoM" | "QoQ" | "YoY";
 
 export interface ColumnMapping {
   project_col: string;
@@ -15,13 +15,14 @@ export interface ClarificationCandidate {
   column: string;
   score: number;
   reasons: string[];
-  sample_values: string[];
+  sample_values: unknown[];
 }
 
 export interface ClarificationRequest {
   field: string;
   message: string;
   candidates: ClarificationCandidate[];
+  allow_none?: boolean;
 }
 
 export interface DatasetMetadata {
@@ -38,29 +39,32 @@ export interface PeriodOption {
   end_period?: string;
 }
 
-export interface UniqueRow {
-  project?: string;
-  region?: string;
-  values: Record<string, number | string | null>;
-}
-
 export interface AnalysisRow {
-  [key: string]: string | number | null | undefined;
+  [key: string]:
+    | string
+    | number
+    | null
+    | undefined;
 }
 
 export interface AnalysisResult {
   rows: AnalysisRow[];
   columns: string[];
-  comparison_view?: AnalysisRow[];
   sum_to_reach?: number;
   summary_sentence?: string;
 }
 
 export interface MetricAnalysis {
-  unique: AnalysisResult;
+  unique: AnalysisResult | null;
   mom: Record<string, AnalysisResult>;
   qoq: Record<string, AnalysisResult>;
   yoy: Record<string, AnalysisResult>;
+}
+
+export interface MetricPeriods {
+  mom: PeriodOption[];
+  qoq: PeriodOption[];
+  yoy: PeriodOption[];
 }
 
 export interface ProjectWiseAnalysis {
@@ -77,28 +81,46 @@ export interface RegionWiseAnalysis {
 
 export interface DatasetSession {
   dataset: DatasetMetadata;
+
   mapping: ColumnMapping;
+
   regions: string[];
+
   periods: {
-    revenue: {
-      mom: PeriodOption[];
-      qoq: PeriodOption[];
-      yoy: PeriodOption[];
-    };
-    cost: {
-      mom: PeriodOption[];
-      qoq: PeriodOption[];
-      yoy: PeriodOption[];
-    };
+    revenue: MetricPeriods;
+    cost: MetricPeriods;
   };
+
   projectWise: ProjectWiseAnalysis;
+
   regionWise: RegionWiseAnalysis;
 }
 
+export type IngestionStatus =
+  | "resolved"
+  | "needs_clarification"
+  | "needs_sheet_selection";
+
 export interface IngestionResponse {
-  status: "resolved" | "needs_clarification";
+  status: IngestionStatus;
+
   session?: DatasetSession;
+
   clarifications?: ClarificationRequest[];
+
+  sheets?: string[];
+
+  filename?: string;
+
+  sheet_name?: string;
+
   header_row_index?: number | null;
+
   header_row_confidence?: number | null;
+}
+
+export interface WorkbookInspectionResponse {
+  status: "success";
+  filename: string;
+  sheets: string[];
 }

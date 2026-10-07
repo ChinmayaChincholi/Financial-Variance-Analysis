@@ -1,10 +1,28 @@
-import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import {
+  useMemo,
+} from "react";
 
-import { AnalysisTable } from "../components/AnalysisTable";
-import { PageHeader } from "../navigation/PageHeader";
-import { SummaryBanner } from "../components/SummaryBanner";
-import { useAnalysisStore } from "../state/analysisStore";
+import {
+  useNavigate,
+  useParams,
+} from "react-router-dom";
+
+import {
+  AnalysisTable,
+} from "../components/AnalysisTable";
+
+import {
+  SummaryBanner,
+} from "../components/SummaryBanner";
+
+import {
+  PageHeader,
+} from "../navigation/PageHeader";
+
+import {
+  useAnalysisStore,
+} from "../state/analysisStore";
+
 import type {
   AnalysisResult,
   Metric,
@@ -13,7 +31,8 @@ import type {
 } from "../types/dataset";
 
 export function AnalysisResultPage() {
-  const navigate = useNavigate();
+  const navigate =
+    useNavigate();
 
   const {
     scope,
@@ -29,74 +48,86 @@ export function AnalysisResultPage() {
     region?: string;
   }>();
 
-  const session = useAnalysisStore(
-    (state) => state.session,
-  );
+  const session =
+    useAnalysisStore(
+      (state) => state.session,
+    );
 
-  const decodedRegion = region
-    ? decodeURIComponent(region)
-    : undefined;
+  const decodedRegion =
+    region
+      ? decodeURIComponent(region)
+      : undefined;
 
-  const result = useMemo<AnalysisResult | null>(
-    () => {
-      if (!session) {
-        return null;
-      }
+  const result =
+    useMemo<AnalysisResult | null>(
+      () => {
+        if (!session) {
+          return null;
+        }
 
-      if (
-        scope !== "project" &&
-        scope !== "region"
-      ) {
-        return null;
-      }
+        if (
+          scope !== "project" &&
+          scope !== "region"
+        ) {
+          return null;
+        }
 
-      if (
-        metric !== "revenue" &&
-        metric !== "cost"
-      ) {
-        return null;
-      }
+        if (
+          metric !== "revenue" &&
+          metric !== "cost"
+        ) {
+          return null;
+        }
 
-      if (
-        period !== "MoM" &&
-        period !== "QoQ" &&
-        period !== "YoY"
-      ) {
-        return null;
-      }
+        if (
+          period !== "MoM" &&
+          period !== "QoQ" &&
+          period !== "YoY"
+        ) {
+          return null;
+        }
 
-      const metricAnalysis =
-        scope === "region" && decodedRegion
-          ? session.regionWise[decodedRegion]?.[
-              metric
-            ]
-          : session.projectWise[metric];
+        const metricAnalysis =
+          scope === "region"
+            ? session.regionWise[
+                decodedRegion ?? ""
+              ]?.[metric]
+            : session.projectWise[
+                metric
+              ];
 
-      if (!metricAnalysis) {
-        return null;
-      }
+        if (!metricAnalysis) {
+          return null;
+        }
 
-      const analysisMap =
-        period === "MoM"
-          ? metricAnalysis.mom
-          : period === "QoQ"
-            ? metricAnalysis.qoq
-            : metricAnalysis.yoy;
+        const analysisMap =
+          period === "MoM"
+            ? metricAnalysis.mom
+            : period === "QoQ"
+              ? metricAnalysis.qoq
+              : metricAnalysis.yoy;
 
-      return analysisMap[selectionId] ?? null;
-    },
-    [
-      decodedRegion,
-      metric,
-      period,
-      scope,
-      selectionId,
-      session,
-    ],
-  );
+        return (
+          analysisMap[
+            selectionId ?? ""
+          ] ?? null
+        );
+      },
+      [
+        decodedRegion,
+        metric,
+        period,
+        scope,
+        selectionId,
+        session,
+      ],
+    );
 
   if (!session) {
-    navigate("/");
+    navigate("/", {
+      replace: true,
+    });
+
     return null;
   }
 
@@ -104,10 +135,13 @@ export function AnalysisResultPage() {
     return (
       <main className="app-shell">
         <div className="page-container">
-          <PageHeader title="Analysis Result" />
+          <PageHeader
+            title="Analysis Result"
+          />
 
           <div className="empty-state">
-            No precomputed result was found for this
+            No precomputed result
+            was found for this
             selection.
           </div>
         </div>
@@ -116,7 +150,9 @@ export function AnalysisResultPage() {
   }
 
   const metricLabel =
-    metric === "revenue" ? "Revenue" : "Cost";
+    metric === "revenue"
+      ? "Revenue"
+      : "Cost";
 
   const periodLabel =
     period === "MoM"
@@ -138,11 +174,17 @@ export function AnalysisResultPage() {
         />
 
         <SummaryBanner
-          text={result.summary_sentence}
-          sumToReach={result.sum_to_reach}
+          text={
+            result.summary_sentence
+          }
+          sumToReach={
+            result.sum_to_reach
+          }
         />
 
-        <AnalysisTable result={result} />
+        <AnalysisTable
+          result={result}
+        />
       </div>
     </main>
   );

@@ -1,23 +1,25 @@
 import type {
-  ClarificationRequest,
+  DatasetSession,
   IngestionResponse,
 } from "./dataset";
 
-export interface ProcessDatasetResponse extends IngestionResponse {}
-
-export interface ResolveDatasetResponse extends IngestionResponse {}
-
-export interface ResolveDatasetPayload {
-  file: File;
-  choices: Record<string, string>;
+export interface SheetListResponse {
+  filename: string;
+  sheets: string[];
 }
 
-export interface ApiErrorResponse {
-  detail?: string;
-  message?: string;
-  error?: string;
+export interface ProcessDatasetResponse
+  extends IngestionResponse {}
+
+export interface ResolveDatasetResponse
+  extends IngestionResponse {}
+
+export interface ExportRequest {
+  rows: Record<string, unknown>[];
+  columns: string[];
+  sheet_name?: string;
+  filename?: string;
 }
 
-export interface ApiClientError extends Error {
-  status?: number;
-}
+export type SessionOrNull =
+  DatasetSession | null;

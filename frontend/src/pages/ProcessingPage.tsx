@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-
 import { LoadingState } from "../components/LoadingState";
 import { processDataset } from "../services/api/datasetApi";
 import { useAnalysisStore } from "../state/analysisStore";
@@ -32,18 +31,27 @@ export function ProcessingPage() {
       return;
     }
 
+    // Capture the narrowed File value.
+    // This prevents TypeScript from treating it as File | null
+    // inside the nested async function.
+    const selectedFile = file;
+
     let cancelled = false;
+    let stageTimer: number | undefined;
 
     async function process() {
       try {
         setProcessing(true, stages[0]);
 
-        const stageTimer = window.setInterval(() => {
+        stageTimer = window.setInterval(() => {
           const currentStage = stages.indexOf(
             useAnalysisStore.getState().processingStage,
           );
 
-          if (currentStage >= 0 && currentStage < stages.length - 1) {
+          if (
+            currentStage >= 0 &&
+            currentStage < stages.length - 1
+          ) {
             setProcessing(
               true,
               stages[currentStage + 1],
@@ -51,9 +59,7 @@ export function ProcessingPage() {
           }
         }, 1200);
 
-        const response = await processDataset(file);
-
-        window.clearInterval(stageTimer);
+        const response = await processDataset(selectedFile);
 
         if (cancelled) {
           return;
@@ -96,6 +102,10 @@ export function ProcessingPage() {
 
         setError(getErrorMessage(error));
         navigate("/");
+      } finally {
+        if (stageTimer !== undefined) {
+          window.clearInterval(stageTimer);
+        }
       }
     }
 
@@ -103,6 +113,10 @@ export function ProcessingPage() {
 
     return () => {
       cancelled = true;
+
+      if (stageTimer !== undefined) {
+        window.clearInterval(stageTimer);
+      }
     };
   }, [
     file,

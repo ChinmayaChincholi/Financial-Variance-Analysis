@@ -1,16 +1,22 @@
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ??
+  "http://127.0.0.1:8000"
+).replace(/\/$/, "");
 
 export async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-  });
+  const response = await fetch(
+    `${API_BASE_URL}${path}`,
+    {
+      ...options,
+    },
+  );
 
   if (!response.ok) {
-    let message = `Request failed with status ${response.status}`;
+    let message =
+      `Request failed with status ${response.status}`;
 
     try {
       const data = await response.json();
@@ -26,11 +32,14 @@ export async function apiRequest<T>(
       // Keep default error message.
     }
 
-    const error = new Error(message) as Error & {
+    const error = new Error(
+      message,
+    ) as Error & {
       status?: number;
     };
 
     error.status = response.status;
+
     throw error;
   }
 
