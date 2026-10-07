@@ -2,11 +2,11 @@
 Parses Month-Year column headers and groups them into Indian FISCAL
 quarters/years (confirmed with the user): fiscal year runs April to
 March, so:
-    Fiscal Q1 = Apr, May, Jun
-    Fiscal Q2 = Jul, Aug, Sep
-    Fiscal Q3 = Oct, Nov, Dec
-    Fiscal Q4 = Jan, Feb, Mar  (belongs to the fiscal year that STARTED
-                                the previous April)
+Fiscal Q1 = Apr, May, Jun
+Fiscal Q2 = Jul, Aug, Sep
+Fiscal Q3 = Oct, Nov, Dec
+Fiscal Q4 = Jan, Feb, Mar (belongs to the fiscal year that STARTED
+the previous April)
 
 A fiscal year is labeled by the calendar year it STARTS in -- e.g.
 "FY2025-26" runs April 2025 through March 2026. This convention was
@@ -36,10 +36,21 @@ def parse_month_year_column(column_name: str) -> tuple[int, int]:
     real-world formats (Mar 2026, Mar-2026, March 2026, 03/2026,
     2026-03, 2026/03, etc.) without needing a hand-written format list.
 
+    fuzzy=True is required, not optional: real client headers combine a
+    metric label with the date in one string (e.g. "Revenue Jan 2026",
+    "Cost Apr 2026") -- see the ingestion layer's column-matching design
+    notes. Without fuzzy=True, dateutil rejects the whole string the
+    moment it sees the leading non-date word, which would silently make
+    every such column invisible to both the ingestion layer AND this
+    function's other callers (date_ranges.py). Verified this doesn't
+    introduce false positives: plain non-date headers ("Region",
+    "Filler", "Customer name") still correctly raise ValueError with
+    fuzzy=True -- there's simply no date substring in them to find.
+
     Raises ValueError if the column name can't be parsed as a date.
     """
     try:
-        parsed = dateutil_parser.parse(column_name, default=datetime(2000, 1, 1))
+        parsed = dateutil_parser.parse(column_name, fuzzy=True, default=datetime(2000, 1, 1))
         return parsed.year, parsed.month
     except (ValueError, OverflowError) as e:
         raise ValueError(
