@@ -22,41 +22,116 @@ already-resolved {period_label: [month_cols]} output as a plain
 argument.
 """
 
+import re
 from collections import defaultdict
 from datetime import datetime
 
 from dateutil import parser as dateutil_parser
 
+_MONTH_NAMES = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+# A month name as a whole word, so "Mar" is found in "Mar-26" but
+# not inside e.g. "Market" or "Summary".
+_MONTH_WORD = re.compile(
+    r"(?<![A-Za-z])(" + "|".join(
+        sorted(_MONTH_NAMES, key=len, reverse=True)
+    ) + r")(?![A-Za-z])",
+    re.IGNORECASE,
+    )
+_FOUR_DIGIT_YEAR = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+_TWO_DIGIT_NUMBER = re.compile(r"(?<!\d)(\d{2})(?!\d)")
+
+def _parse_named_month(column_name: str) -> tuple[int, int] | None:
+    """
+    Handles headers that contain a month NAME: "Apr-24", "Apr 2024",
+    "April-2024", "Revenue Jan 2026", " Jan-25", "24-Apr" ...
+
+    A number next to the month name is the YEAR, never a day: in a
+    Month-Year column header "Apr-24" means April 2024. (dateutil's
+    fuzzy parser reads it as April 24th of its default year, which
+    silently threw the year away.)
+
+    Returns None when there is no month name, or no year to go with it.
+    """
+    month_match = _MONTH_WORD.search(column_name)
+
+    if month_match is None:
+        return None
+
+    month = _MONTH_NAMES[month_match.group(1).lower()]
+
+    four_digit = _FOUR_DIGIT_YEAR.search(column_name)
+
+    if four_digit is not None:
+        return int(four_digit.group(1)), month
+
+    two_digit = _TWO_DIGIT_NUMBER.findall(column_name)
+
+    if two_digit:
+        # Last 2-digit number wins ("1-Apr-24" -> 24, not 01).
+        return 2000 + int(two_digit[-1]), month
+
+    return None
 
 def parse_month_year_column(column_name: str) -> tuple[int, int]:
     """
     Parses a Month-Year column header into (calendar_year, calendar_month).
 
-    Uses dateutil's permissive parser, which already handles most
-    real-world formats (Mar 2026, Mar-2026, March 2026, 03/2026,
-    2026-03, 2026/03, etc.) without needing a hand-written format list.
+    1. Headers with a month name ("Apr-24", "March 2026",
+       "Revenue Jan 2026") are read by _parse_named_month, which
+       treats a 2-digit number as the year.
+    2. Everything else ("03/2026", "2026-03", "2026-03-01 00:00:00")
+       goes to dateutil.
 
-    fuzzy=True is required, not optional: real client headers combine a
-    metric label with the date in one string (e.g. "Revenue Jan 2026",
-    "Cost Apr 2026") -- see the ingestion layer's column-matching design
-    notes. Without fuzzy=True, dateutil rejects the whole string the
-    moment it sees the leading non-date word, which would silently make
-    every such column invisible to both the ingestion layer AND this
-    function's other callers (date_ranges.py). Verified this doesn't
-    introduce false positives: plain non-date headers ("Region",
-    "Filler", "Customer name") still correctly raise ValueError with
-    fuzzy=True -- there's simply no date substring in them to find.
+    The dateutil path must find BOTH a month and a year in the text.
+    We parse twice with different defaults: if the month or the year
+    changes between the two runs, that part came from the default and
+    was not actually present in the header. This is what rejects
+    non-date headers that fuzzy parsing would otherwise accept, e.g.
+    pandas' de-duplicated "Service Line.1" (day 1, month and year
+    from the default) or the placeholder "Unnamed: 62".
 
-    Raises ValueError if the column name can't be parsed as a date.
+    Raises ValueError if the column name can't be parsed as a Month-Year.
     """
+    text = str(column_name).strip()
+
+    named = _parse_named_month(text)
+
+    if named is not None:
+        return named
+
     try:
-        parsed = dateutil_parser.parse(column_name, fuzzy=True, default=datetime(2000, 1, 1))
-        return parsed.year, parsed.month
+        first = dateutil_parser.parse(
+            text, fuzzy=True, default=datetime(2000, 1, 1)
+        )
+        second = dateutil_parser.parse(
+            text, fuzzy=True, default=datetime(2001, 2, 2)
+        )
     except (ValueError, OverflowError) as e:
         raise ValueError(
             f"Could not parse '{column_name}' as a Month-Year column"
         ) from e
 
+    if first.month != second.month or first.year != second.year:
+        raise ValueError(
+            f"Could not parse '{column_name}' as a Month-Year column "
+            f"(no month and year found in the header)"
+        )
+
+    return first.year, first.month
 
 def month_to_fiscal_quarter(calendar_year: int, calendar_month: int) -> tuple[int, int]:
     """
@@ -75,18 +150,15 @@ def month_to_fiscal_quarter(calendar_year: int, calendar_month: int) -> tuple[in
     else:  # calendar_month in (1, 2, 3)
         return calendar_year - 1, 4
 
-
 def format_fiscal_quarter_label(fiscal_year: int, quarter_num: int) -> str:
     """e.g. (2025, 1) -> 'Q1 FY2025-26'"""
     next_year_suffix = (fiscal_year + 1) % 100
     return f"Q{quarter_num} FY{fiscal_year}-{next_year_suffix:02d}"
 
-
 def format_fiscal_year_label(fiscal_year: int) -> str:
     """e.g. 2025 -> 'FY2025-26'"""
     next_year_suffix = (fiscal_year + 1) % 100
     return f"FY{fiscal_year}-{next_year_suffix:02d}"
-
 
 def group_months_into_fiscal_quarters_structured(
         month_cols: list[str],
@@ -107,7 +179,6 @@ def group_months_into_fiscal_quarters_structured(
     ordered_keys = sorted(groups.keys())
     return {key: groups[key] for key in ordered_keys}
 
-
 def group_months_into_quarters(month_cols: list[str]) -> dict[str, list[str]]:
     """
     Public, string-labeled version -- this is what gets handed to the
@@ -118,7 +189,6 @@ def group_months_into_quarters(month_cols: list[str]) -> dict[str, list[str]]:
     return {
         format_fiscal_quarter_label(*key): cols for key, cols in structured.items()
     }
-
 
 def group_months_into_fiscal_years_structured(
         month_cols: list[str],
@@ -133,7 +203,6 @@ def group_months_into_fiscal_years_structured(
 
     ordered_keys = sorted(groups.keys())
     return {key: groups[key] for key in ordered_keys}
-
 
 def group_months_into_years(month_cols: list[str]) -> dict[str, list[str]]:
     """Public, string-labeled version, for the analysis layer."""

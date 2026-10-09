@@ -21,19 +21,17 @@ import pandas as pd
 from fastapi import UploadFile
 
 from ingestion.column_matching_pipeline import (
-    resolve_ingestion_with_choices,
-    run_ingestion,
+    resolve_ingestion_with_choices_and_dataframe,
+    run_ingestion_with_dataframe,
 )
 from services.precomputation_service import (
     precompute_dataset,
 )
 
-
 ALLOWED_EXTENSIONS = {
     ".xlsx",
     ".xls",
 }
-
 
 def _validate_filename(
         filename: str | None,
@@ -52,7 +50,6 @@ def _validate_filename(
         )
 
     return suffix
-
 
 async def _materialize_upload(
         file: UploadFile,
@@ -109,7 +106,6 @@ async def _materialize_upload(
         file.filename or "dataset.xlsx",
     )
 
-
 def _cleanup(
         temporary_path: str,
 ) -> None:
@@ -121,7 +117,6 @@ def _cleanup(
         )
     except OSError:
         pass
-
 
 def _read_workbook_sheets(
         path: str,
@@ -136,7 +131,6 @@ def _read_workbook_sheets(
     return list(
         workbook.sheet_names
     )
-
 
 async def inspect_workbook(
         file: UploadFile,
@@ -161,7 +155,6 @@ async def inspect_workbook(
             temporary_path
         )
 
-
 def _clarification_response(
         ingestion_result,
         filename: str,
@@ -183,7 +176,6 @@ def _clarification_response(
             ingestion_result.header_row_confidence
         ),
     }
-
 
 def _process_materialized_dataset(
         temporary_path: str,
@@ -248,7 +240,7 @@ def _process_materialized_dataset(
         "Detecting columns"
     )
 
-    ingestion_result = run_ingestion(
+    ingestion_result, dataframe = run_ingestion_with_dataframe(
         path=temporary_path,
         sheet_name=sheet_name,
     )
@@ -276,6 +268,7 @@ def _process_materialized_dataset(
         ingestion_result=ingestion_result,
         filename=filename,
         progress_callback=progress_callback,
+        dataframe=dataframe,
     )
 
     # ---------------------------------------------------------
@@ -290,7 +283,6 @@ def _process_materialized_dataset(
         "status": "resolved",
         "session": session.to_dict(),
     }
-
 
 async def process_dataset(
         file: UploadFile,
@@ -319,7 +311,6 @@ async def process_dataset(
         _cleanup(
             temporary_path
         )
-
 
 async def _stream_materialized_dataset(
         temporary_path: str,
@@ -425,7 +416,6 @@ async def _stream_materialized_dataset(
 
         raise
 
-
 async def stream_process_dataset(
         file: UploadFile,
         sheet_name: str | None = None,
@@ -476,7 +466,6 @@ async def stream_process_dataset(
 
         raise
 
-
 async def resolve_dataset(
         file: UploadFile,
         sheet_name: str,
@@ -522,8 +511,8 @@ async def resolve_dataset(
             for key, value in choices.items()
         }
 
-        ingestion_result = (
-            resolve_ingestion_with_choices(
+        ingestion_result, dataframe = (
+            resolve_ingestion_with_choices_and_dataframe(
                 path=temporary_path,
                 sheet_name=sheet_name,
                 choices=normalized_choices,
@@ -545,6 +534,7 @@ async def resolve_dataset(
             sheet_name=sheet_name,
             ingestion_result=ingestion_result,
             filename=filename,
+            dataframe=dataframe,
         )
 
         return {

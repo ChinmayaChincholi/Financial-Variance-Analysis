@@ -35,18 +35,21 @@ export function AnalysisResultPage() {
     useNavigate();
 
   const {
-    scope,
-    metric,
-    period,
-    selectionId,
-    region,
-  } = useParams<{
-    scope: Scope;
-    metric: Metric;
-    period: PeriodType;
-    selectionId: string;
-    region?: string;
-  }>();
+      metric,
+      period,
+      selectionId,
+      region,
+    } = useParams<{
+      metric: Metric;
+      period: PeriodType;
+      selectionId: string;
+      region?: string;
+    }>();
+
+    const scope: Scope =
+      region !== undefined
+        ? "region"
+        : "project";
 
   const session =
     useAnalysisStore(

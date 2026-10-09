@@ -16,6 +16,7 @@ import pandas as pd
 from analysis.project_wise import run_project_wise_analysis
 from analysis.region_wise import get_available_regions
 from ingestion.date_ranges import determine_unique_projects_range
+from ingestion.excel_io import read_sheet
 from ingestion.period_grouping import (
     format_fiscal_quarter_label,
     format_fiscal_year_label,
@@ -25,7 +26,6 @@ from ingestion.period_grouping import (
 )
 from ingestion.schema import IngestionResult
 from models.session import DatasetSession
-
 
 def _json_safe_value(value: Any) -> Any:
     if value is None:
@@ -45,7 +45,6 @@ def _json_safe_value(value: Any) -> Any:
 
     return value
 
-
 def _dataframe_to_records(
         df: pd.DataFrame,
 ) -> list[dict[str, Any]]:
@@ -60,7 +59,6 @@ def _dataframe_to_records(
         }
         for record in records
     ]
-
 
 def _analysis_result_to_dict(
         result: dict,
@@ -85,7 +83,6 @@ def _analysis_result_to_dict(
         ),
     }
 
-
 def _unique_result_to_dict(
         df: pd.DataFrame,
 ) -> dict[str, Any]:
@@ -97,7 +94,6 @@ def _unique_result_to_dict(
         ],
     }
 
-
 def _chronological_columns(
         month_cols: list[str],
 ) -> list[str]:
@@ -105,7 +101,6 @@ def _chronological_columns(
         month_cols,
         key=parse_month_year_column,
     )
-
 
 def _available_months(
         month_cols: list[str],
@@ -127,7 +122,6 @@ def _available_months(
             result.append(column)
 
     return result
-
 
 def _complete_quarters(
         month_cols: list[str],
@@ -167,7 +161,6 @@ def _complete_quarters(
 
     return result
 
-
 def _next_quarter_key(
         fiscal_year: int,
         quarter: int,
@@ -176,7 +169,6 @@ def _next_quarter_key(
         return fiscal_year + 1, 1
 
     return fiscal_year, quarter + 1
-
 
 def _complete_years(
         month_cols: list[str],
@@ -206,7 +198,6 @@ def _complete_years(
 
     return result
 
-
 def _build_mom_option(
         months: list[str],
 ) -> dict[str, Any]:
@@ -222,7 +213,6 @@ def _build_mom_option(
         "start_period": first,
         "end_period": third,
     }
-
 
 def _build_qoq_option(
         qa_key: tuple[int, int],
@@ -247,7 +237,6 @@ def _build_qoq_option(
         "end_period": qb_label,
     }
 
-
 def _build_yoy_option(
         year_x: int,
         year_y: int,
@@ -270,7 +259,6 @@ def _build_yoy_option(
         "start_period": x_label,
         "end_period": y_label,
     }
-
 
 def _build_period_metadata(
         month_cols: list[str],
@@ -342,7 +330,6 @@ def _build_period_metadata(
         "yoy": yoy,
     }
 
-
 def _build_unique_view(
         df: pd.DataFrame,
         project_col: str,
@@ -373,7 +360,6 @@ def _build_unique_view(
     )
 
     return _unique_result_to_dict(result)
-
 
 def _build_mom_views(
         df: pd.DataFrame,
@@ -408,7 +394,6 @@ def _build_mom_views(
             result
         )
     }
-
 
 def _build_qoq_views(
         df: pd.DataFrame,
@@ -479,7 +464,6 @@ def _build_qoq_views(
         )
 
     return result
-
 
 def _build_yoy_views(
         df: pd.DataFrame,
@@ -588,7 +572,6 @@ def _build_yoy_views(
 
     return result
 
-
 def _build_metric_analysis(
         df: pd.DataFrame,
         project_col: str,
@@ -630,7 +613,6 @@ def _build_metric_analysis(
         ),
     }
 
-
 def _build_project_wise(
         df: pd.DataFrame,
         project_col: str,
@@ -661,7 +643,6 @@ def _build_project_wise(
             as_of,
         ),
     }
-
 
 def _build_region_wise(
         df: pd.DataFrame,
@@ -713,7 +694,6 @@ def _build_region_wise(
 
     return result
 
-
 def precompute_dataset(
         file_path: str,
         sheet_name: str,
@@ -723,9 +703,13 @@ def precompute_dataset(
                                [str],
                                None,
                            ] | None = None,
+        dataframe: pd.DataFrame | None = None,
 ) -> DatasetSession:
     """
     Load the resolved dataset and compute the entire session.
+
+    If `dataframe` is supplied (already parsed during ingestion with
+    the same header row) it is reused; otherwise the workbook is read.
 
     progress_callback is called only at real stage boundaries.
     It does not report fabricated percentage progress.
@@ -746,11 +730,14 @@ def precompute_dataset(
         else 0
     )
 
-    df = pd.read_excel(
-        file_path,
-        sheet_name=sheet_name,
-        header=header_row,
-    )
+    if dataframe is not None:
+        df = dataframe
+    else:
+        df = read_sheet(
+            file_path,
+            sheet_name,
+            header=header_row,
+        )
 
     as_of = date.today()
 

@@ -22,7 +22,6 @@ import {
   getErrorMessage,
 } from "../utils/errors";
 
-
 export function ProcessingPage() {
   const navigate =
     useNavigate();
@@ -32,12 +31,12 @@ export function ProcessingPage() {
     selectedSheet,
     processingStage,
     setSheets,
+    setSelectedSheet, // ← CHANGED (added)
     setSession,
     setClarifications,
     setProcessing,
     setError,
   } = useAnalysisStore();
-
 
   useEffect(() => {
     if (!file) {
@@ -60,7 +59,6 @@ export function ProcessingPage() {
     let cancelled =
       false;
 
-
     async function process() {
       try {
         /*
@@ -73,7 +71,6 @@ export function ProcessingPage() {
           true,
           "Importing dataset",
         );
-
 
         const response =
           await processDatasetWithProgress(
@@ -93,11 +90,9 @@ export function ProcessingPage() {
             controller.signal,
           );
 
-
         if (cancelled) {
           return;
         }
-
 
         /*
          * Multiple worksheets were detected.
@@ -125,7 +120,6 @@ export function ProcessingPage() {
           return;
         }
 
-
         /*
          * Column matching needs user input.
          */
@@ -133,6 +127,18 @@ export function ProcessingPage() {
           response.status ===
           "needs_clarification"
         ) {
+          /*
+           * Single-sheet workbooks never visit the sheet-selection
+           * page, so the store's selectedSheet would stay null and
+           * ClarificationPage would render nothing. Persist the
+           * sheet the backend actually used.
+           */
+          if (response.sheet_name) { // ← CHANGED (added block)
+            setSelectedSheet(
+              response.sheet_name,
+            );
+          }
+
           setClarifications(
             response.clarifications ??
               [],
@@ -149,7 +155,6 @@ export function ProcessingPage() {
           return;
         }
 
-
         /*
          * Normal successful processing.
          */
@@ -160,7 +165,6 @@ export function ProcessingPage() {
             "The backend did not return a completed analysis session.",
           );
         }
-
 
         setSession(
           response.session,
@@ -216,9 +220,7 @@ export function ProcessingPage() {
       }
     }
 
-
     process();
-
 
     return () => {
       cancelled = true;
@@ -231,10 +233,10 @@ export function ProcessingPage() {
     setClarifications,
     setError,
     setProcessing,
+    setSelectedSheet, // ← CHANGED (added)
     setSession,
     setSheets,
   ]);
-
 
   return (
     <main className="app-shell">

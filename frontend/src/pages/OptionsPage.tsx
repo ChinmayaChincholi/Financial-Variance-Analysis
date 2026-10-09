@@ -30,12 +30,15 @@ export function OptionsPage() {
     useNavigate();
 
   const {
-    scope,
-    region,
-  } = useParams<{
-    scope: Scope;
-    region?: string;
-  }>();
+      region,
+    } = useParams<{
+      region?: string;
+    }>();
+
+    const scope: Scope =
+      region !== undefined
+        ? "region"
+        : "project";
 
   const session =
     useAnalysisStore(

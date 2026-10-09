@@ -26,16 +26,19 @@ export function PeriodSelectionPage() {
     useNavigate();
 
   const {
-    scope,
-    metric,
-    period,
-    region,
-  } = useParams<{
-    scope: Scope;
-    metric: Metric;
-    period: PeriodType;
-    region?: string;
-  }>();
+      metric,
+      period,
+      region,
+    } = useParams<{
+      metric: Metric;
+      period: PeriodType;
+      region?: string;
+    }>();
+
+    const scope: Scope =
+      region !== undefined
+        ? "region"
+        : "project";
 
   const session =
     useAnalysisStore(

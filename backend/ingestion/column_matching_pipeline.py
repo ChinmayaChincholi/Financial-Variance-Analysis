@@ -27,6 +27,7 @@ from ingestion.column_scoring import (
     score_project_candidates,
     score_region_candidates,
 )
+from ingestion.excel_io import read_sheet
 from ingestion.header_detection import detect_header_row
 from ingestion.metric_block_resolver import resolve_metric_blocks
 from ingestion.schema import (
@@ -42,6 +43,9 @@ NO_REGION_CHOICE = "__none__"
 
 METRIC_BLOCK_FIELD_PREFIX = "metric_block_"
 
+# ← CHANGED (added): header detection only inspects the first few rows
+# (see header_detection), so never parse the whole sheet for it.
+HEADER_SCAN_ROWS = 15
 
 def _to_candidate_out(candidates) -> list[ColumnCandidateOut]:
     return [
@@ -54,7 +58,6 @@ def _to_candidate_out(candidates) -> list[ColumnCandidateOut]:
         for c in candidates
     ]
 
-
 def _block_label(columns: list[str]) -> str:
     if len(columns) == 1:
         return columns[0]
@@ -63,7 +66,6 @@ def _block_label(columns: list[str]) -> str:
         f"{columns[0]} .. {columns[-1]} "
         f"({len(columns)} columns)"
     )
-
 
 def _validate_column_choice(
         df: pd.DataFrame,
@@ -77,7 +79,6 @@ def _validate_column_choice(
         )
 
     return chosen_column
-
 
 def _parse_header_choice(value: str) -> int:
     """
@@ -119,7 +120,6 @@ def _parse_header_choice(value: str) -> int:
         f"Invalid header row selection '{value}'."
     )
 
-
 def _build_metric_clarifications(
         unresolved_blocks,
 ) -> list[ClarificationRequest]:
@@ -154,7 +154,6 @@ def _build_metric_clarifications(
         )
 
     return clarifications
-
 
 def _resolve_dataframe(
         df: pd.DataFrame,
@@ -362,20 +361,24 @@ def _resolve_dataframe(
         header_row_confidence=header_row_confidence,
     )
 
-
-def run_ingestion(
+def run_ingestion_with_dataframe(
         path: str,
         sheet_name: str,
         weights: ScoringWeights = ScoringWeights(),
-) -> IngestionResult:
+) -> tuple[IngestionResult, pd.DataFrame | None]:
     """
     Run automatic ingestion against one workbook sheet.
+
+    Also returns the fully parsed DataFrame (None if the header row
+    could not be identified) so callers can reuse it instead of
+    parsing the workbook again.
     """
 
-    raw = pd.read_excel(
+    raw = read_sheet(
         path,
-        sheet_name=sheet_name,
+        sheet_name,
         header=None,
+        nrows=HEADER_SCAN_ROWS,
     )
 
     header_result = detect_header_row(raw)
@@ -384,46 +387,49 @@ def run_ingestion(
             header_result.confidence
             < HEADER_ROW_CONFIDENCE_FLOOR
     ):
-        return IngestionResult(
-            status="needs_clarification",
-            clarifications=[
-                ClarificationRequest(
-                    field="header_row",
-                    message=(
-                        "Couldn't confidently identify which "
-                        "row contains the column headers. "
-                        "Please select the correct row."
-                    ),
-                    candidates=[
-                        ColumnCandidateOut(
-                            column=(
-                                f"Row {r['row_index'] + 1}"
-                            ),
-                            score=r["score"],
-                            reasons=[],
-                            sample_values=r["preview"],
-                        )
-                        for r in header_result.candidate_rows[
-                            :5
-                        ]
-                    ],
-                )
-            ],
-            header_row_index=(
-                header_result.header_row_index
+        return (
+            IngestionResult(
+                status="needs_clarification",
+                clarifications=[
+                    ClarificationRequest(
+                        field="header_row",
+                        message=(
+                            "Couldn't confidently identify which "
+                            "row contains the column headers. "
+                            "Please select the correct row."
+                        ),
+                        candidates=[
+                            ColumnCandidateOut(
+                                column=(
+                                    f"Row {r['row_index'] + 1}"
+                                ),
+                                score=r["score"],
+                                reasons=[],
+                                sample_values=r["preview"],
+                            )
+                            for r in header_result.candidate_rows[
+                                :5
+                            ]
+                        ],
+                    )
+                ],
+                header_row_index=(
+                    header_result.header_row_index
+                ),
+                header_row_confidence=(
+                    header_result.confidence
+                ),
             ),
-            header_row_confidence=(
-                header_result.confidence
-            ),
+            None,
         )
 
-    df = pd.read_excel(
+    df = read_sheet(
         path,
-        sheet_name=sheet_name,
+        sheet_name,
         header=header_result.header_row_index,
     )
 
-    return _resolve_dataframe(
+    result = _resolve_dataframe(
         df,
         header_row_index=(
             header_result.header_row_index
@@ -434,6 +440,24 @@ def run_ingestion(
         weights=weights,
     )
 
+    return result, df
+
+def run_ingestion(
+        path: str,
+        sheet_name: str,
+        weights: ScoringWeights = ScoringWeights(),
+) -> IngestionResult:
+    """
+    Run automatic ingestion against one workbook sheet.
+    """
+
+    result, _ = run_ingestion_with_dataframe(
+        path,
+        sheet_name,
+        weights=weights,
+    )
+
+    return result
 
 def run_ingestion_on_dataframe(
         df: pd.DataFrame,
@@ -454,24 +478,25 @@ def run_ingestion_on_dataframe(
         weights=weights,
     )
 
-
-def resolve_ingestion_with_choices(
+def resolve_ingestion_with_choices_and_dataframe(
         path: str,
         sheet_name: str,
         choices: dict[str, str],
         weights: ScoringWeights = ScoringWeights(),
-) -> IngestionResult:
+) -> tuple[IngestionResult, pd.DataFrame | None]:
     """
     Re-run ingestion using explicit decisions made by the user.
 
     This is the authoritative second pass used by the frontend
-    clarification page.
+    clarification page. Also returns the parsed DataFrame so the
+    caller can reuse it instead of parsing the workbook again.
     """
 
-    raw = pd.read_excel(
+    raw = read_sheet(
         path,
-        sheet_name=sheet_name,
+        sheet_name,
         header=None,
+        nrows=HEADER_SCAN_ROWS,
     )
 
     if "header_row" in choices:
@@ -481,7 +506,7 @@ def resolve_ingestion_with_choices(
 
         if (
                 header_row_index < 0
-                or header_row_index >= len(raw)
+                or header_row_index >= HEADER_SCAN_ROWS
         ):
             raise ValueError(
                 f"Selected header row "
@@ -498,7 +523,7 @@ def resolve_ingestion_with_choices(
                 header_result.confidence
                 < HEADER_ROW_CONFIDENCE_FLOOR
         ):
-            return run_ingestion(
+            return run_ingestion_with_dataframe(
                 path,
                 sheet_name,
                 weights=weights,
@@ -511,13 +536,13 @@ def resolve_ingestion_with_choices(
             header_result.confidence
         )
 
-    df = pd.read_excel(
+    df = read_sheet(
         path,
-        sheet_name=sheet_name,
+        sheet_name,
         header=header_row_index,
     )
 
-    return _resolve_dataframe(
+    result = _resolve_dataframe(
         df,
         choices=choices,
         header_row_index=header_row_index,
@@ -525,6 +550,26 @@ def resolve_ingestion_with_choices(
         weights=weights,
     )
 
+    return result, df
+
+def resolve_ingestion_with_choices(
+        path: str,
+        sheet_name: str,
+        choices: dict[str, str],
+        weights: ScoringWeights = ScoringWeights(),
+) -> IngestionResult:
+    """
+    Re-run ingestion using explicit decisions made by the user.
+    """
+
+    result, _ = resolve_ingestion_with_choices_and_dataframe(
+        path,
+        sheet_name,
+        choices,
+        weights=weights,
+    )
+
+    return result
 
 def apply_user_choice(
         result: IngestionResult,

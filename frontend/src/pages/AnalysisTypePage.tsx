@@ -31,14 +31,17 @@ export function AnalysisTypePage() {
     useNavigate();
 
   const {
-    scope,
-    metric,
-    region,
-  } = useParams<{
-    scope: Scope;
-    metric: Metric;
-    region?: string;
-  }>();
+      metric,
+      region,
+    } = useParams<{
+      metric: Metric;
+      region?: string;
+    }>();
+
+    const scope: Scope =
+      region !== undefined
+        ? "region"
+        : "project";
 
   const session =
     useAnalysisStore(

@@ -5,6 +5,10 @@ import {
 } from "react-router-dom";
 
 import {
+  RequireSession,
+} from "../components/RequireSession";
+
+import {
   AnalysisResultPage,
 } from "../pages/AnalysisResultPage";
 
@@ -77,111 +81,115 @@ export default function App() {
         }
       />
 
-      <Route
-        path="/scope"
-        element={<ScopePage />}
-      />
+      {/* Everything below needs a loaded dataset session. */}
+      {/* A refresh (which clears memory) redirects to "/". */}
+      <Route element={<RequireSession />}>
+        <Route
+          path="/scope"
+          element={<ScopePage />}
+        />
 
-      {/* ------------------------------------------------ */}
-      {/* Options */}
-      {/* ------------------------------------------------ */}
+        {/* ------------------------------------------------ */}
+        {/* Options */}
+        {/* ------------------------------------------------ */}
 
-      <Route
-        path="/options/project"
-        element={
-          <OptionsPage />
-        }
-      />
+        <Route
+          path="/options/project"
+          element={
+            <OptionsPage />
+          }
+        />
 
-      <Route
-        path="/options/region/:region"
-        element={
-          <OptionsPage />
-        }
-      />
+        <Route
+          path="/options/region/:region"
+          element={
+            <OptionsPage />
+          }
+        />
 
-      {/* ------------------------------------------------ */}
-      {/* Analysis type */}
-      {/* ------------------------------------------------ */}
+        {/* ------------------------------------------------ */}
+        {/* Analysis type */}
+        {/* ------------------------------------------------ */}
 
-      <Route
-        path="/analysis-options/project/:metric"
-        element={
-          <AnalysisTypePage />
-        }
-      />
+        <Route
+          path="/analysis-options/project/:metric"
+          element={
+            <AnalysisTypePage />
+          }
+        />
 
-      <Route
-        path="/analysis-options/region/:region/:metric"
-        element={
-          <AnalysisTypePage />
-        }
-      />
+        <Route
+          path="/analysis-options/region/:region/:metric"
+          element={
+            <AnalysisTypePage />
+          }
+        />
 
-      {/* ------------------------------------------------ */}
-      {/* Unique */}
-      {/* ------------------------------------------------ */}
+        {/* ------------------------------------------------ */}
+        {/* Unique */}
+        {/* ------------------------------------------------ */}
 
-      <Route
-        path="/options/project/unique/:metric"
-        element={
-          <UniqueProjectsPage />
-        }
-      />
+        <Route
+          path="/options/project/unique/:metric"
+          element={
+            <UniqueProjectsPage />
+          }
+        />
 
-      <Route
-        path="/options/region/:region/unique/:metric"
-        element={
-          <UniqueProjectsPage />
-        }
-      />
+        <Route
+          path="/options/region/:region/unique/:metric"
+          element={
+            <UniqueProjectsPage />
+          }
+        />
 
-      {/* ------------------------------------------------ */}
-      {/* Period selection */}
-      {/* ------------------------------------------------ */}
+        {/* ------------------------------------------------ */}
+        {/* Period selection */}
+        {/* ------------------------------------------------ */}
 
-      <Route
-        path="/periods/project/:metric/:period"
-        element={
-          <PeriodSelectionPage />
-        }
-      />
+        <Route
+          path="/periods/project/:metric/:period"
+          element={
+            <PeriodSelectionPage />
+          }
+        />
 
-      <Route
-        path="/periods/region/:region/:metric/:period"
-        element={
-          <PeriodSelectionPage />
-        }
-      />
+        <Route
+          path="/periods/region/:region/:metric/:period"
+          element={
+            <PeriodSelectionPage />
+          }
+        />
 
-      {/* ------------------------------------------------ */}
-      {/* Analysis result */}
-      {/* ------------------------------------------------ */}
+        {/* ------------------------------------------------ */}
+        {/* Analysis result */}
+        {/* ------------------------------------------------ */}
 
-      <Route
-        path="/analysis/project/:metric/:period/:selectionId"
-        element={
-          <AnalysisResultPage />
-        }
-      />
+        <Route
+          path="/analysis/project/:metric/:period/:selectionId"
+          element={
+            <AnalysisResultPage />
+          }
+        />
 
-      <Route
-        path="/analysis/region/:region/:metric/:period/:selectionId"
-        element={
-          <AnalysisResultPage />
-        }
-      />
+        <Route
+          path="/analysis/region/:region/:metric/:period/:selectionId"
+          element={
+            <AnalysisResultPage />
+          }
+        />
 
-      {/* ------------------------------------------------ */}
-      {/* Region selection */}
-      {/* ------------------------------------------------ */}
+        {/* ------------------------------------------------ */}
+        {/* Region selection */}
+        {/* ------------------------------------------------ */}
 
-      <Route
-        path="/regions"
-        element={
-          <RegionSelectionPage />
-        }
-      />
+        <Route
+          path="/regions"
+          element={
+            <RegionSelectionPage />
+          }
+        />
+      </Route>
 
       {/* ------------------------------------------------ */}
       {/* Fallback */}

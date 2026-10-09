@@ -4,6 +4,7 @@ import {
 } from "react";
 
 import {
+  Navigate,
   useNavigate,
 } from "react-router-dom";
 
@@ -35,27 +36,12 @@ export function ClarificationPage() {
     setClarificationChoice,
     setClarifications,
     setSession,
+    error, // ← CHANGED (added)
     setError,
   } = useAnalysisStore();
 
   const [submitting, setSubmitting] =
     useState(false);
-
-  if (!file) {
-    navigate("/", {
-      replace: true,
-    });
-
-    return null;
-  }
-
-  if (!selectedSheet) {
-    navigate("/processing", {
-      replace: true,
-    });
-
-    return null;
-  }
 
   const allFieldsSelected =
     useMemo(() => {
@@ -79,6 +65,15 @@ export function ClarificationPage() {
       clarificationChoices,
       clarifications,
     ]);
+
+  if (!file || !selectedSheet) {
+    return (
+      <Navigate
+        to="/"
+        replace
+      />
+    );
+  }
 
   async function handleContinue() {
     if (
@@ -140,6 +135,12 @@ export function ClarificationPage() {
           title="Confirm Detected Columns"
           subtitle="Some dataset fields need your confirmation before analysis can continue."
         />
+
+        {error && ( // ← CHANGED (added block)
+          <div className="error-message">
+            {error}
+          </div>
+        )}
 
         <div className="clarification-list">
           {clarifications.map(
