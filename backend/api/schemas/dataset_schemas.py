@@ -10,9 +10,7 @@ from pydantic import BaseModel, Field
 class WorkbookInspectionResponse(BaseModel):
     status: Literal["success"]
     filename: str
-    sheets: list[str] = Field(
-        default_factory=list
-    )
+    sheets: list[str] = Field(default_factory=list)
 
 
 class DatasetProcessResponse(BaseModel):
@@ -21,23 +19,14 @@ class DatasetProcessResponse(BaseModel):
         "needs_clarification",
         "needs_sheet_selection",
     ]
-
-    session: dict[str, Any] | None = None
-
-    clarifications: list[
-        dict[str, Any]
-    ] = Field(default_factory=list)
-
-    sheets: list[str] = Field(
-        default_factory=list
-    )
-
+    # Metadata of the saved workspace. The full analysis session is fetched
+    # separately from /api/workspaces/{id}.
+    workspace: dict[str, Any] | None = None
+    clarifications: list[dict[str, Any]] = Field(default_factory=list)
+    sheets: list[str] = Field(default_factory=list)
     filename: str | None = None
-
     sheet_name: str | None = None
-
     header_row_index: int | None = None
-
     header_row_confidence: float | None = None
 
 

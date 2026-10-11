@@ -8,11 +8,13 @@ Responsibilities:
 - run ingestion
 - resolve clarification choices
 - trigger complete precomputation
+- save the finished analysis as a local workspace
 - stream real processing stages to the frontend
 """
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -24,36 +26,29 @@ from ingestion.column_matching_pipeline import (
     resolve_ingestion_with_choices_and_dataframe,
     run_ingestion_with_dataframe,
 )
-from services.precomputation_service import (
-    precompute_dataset,
-)
+from services.precomputation_service import precompute_dataset
+from storage.workspace_store import get_store
 
 ALLOWED_EXTENSIONS = {
     ".xlsx",
     ".xls",
 }
 
-def _validate_filename(
-        filename: str | None,
-) -> str:
+ProgressCallback = Callable[..., None]
+
+
+def _validate_filename(filename: str | None) -> str:
     if not filename:
-        raise ValueError(
-            "No filename was provided."
-        )
-
+        raise ValueError("No filename was provided.")
     suffix = Path(filename).suffix.lower()
-
     if suffix not in ALLOWED_EXTENSIONS:
         raise ValueError(
-            "Unsupported file type. Please upload "
-            "an Excel file (.xlsx or .xls)."
+            "Unsupported file type. Please upload an Excel file (.xlsx or .xls)."
         )
-
     return suffix
 
-async def _materialize_upload(
-        file: UploadFile,
-) -> tuple[str, str]:
+
+async def _materialize_upload(file: UploadFile) -> tuple[str, str]:
     """
     Read the uploaded file while the FastAPI UploadFile is
     still alive and copy it to a temporary file.
@@ -62,98 +57,53 @@ async def _materialize_upload(
     This must happen before returning a StreamingResponse.
     FastAPI may close UploadFile after the route returns.
     """
-
-    suffix = _validate_filename(
-        file.filename
-    )
-
+    suffix = _validate_filename(file.filename)
     file_bytes = await file.read()
-
     if not file_bytes:
-        raise ValueError(
-            "The uploaded file is empty."
-        )
+        raise ValueError("The uploaded file is empty.")
 
-    temporary_file = NamedTemporaryFile(
-        suffix=suffix,
-        delete=False,
-    )
-
+    temporary_file = NamedTemporaryFile(suffix=suffix, delete=False)
     temporary_path = temporary_file.name
-
     try:
-        temporary_file.write(
-            file_bytes
-        )
+        temporary_file.write(file_bytes)
         temporary_file.close()
-
     except Exception:
         temporary_file.close()
-
         try:
-            Path(
-                temporary_path
-            ).unlink(
-                missing_ok=True
-            )
+            Path(temporary_path).unlink(missing_ok=True)
         except OSError:
             pass
-
         raise
 
-    return (
-        temporary_path,
-        file.filename or "dataset.xlsx",
-    )
+    return temporary_path, file.filename or "dataset.xlsx"
 
-def _cleanup(
-        temporary_path: str,
-) -> None:
+
+def _cleanup(temporary_path: str) -> None:
     try:
-        Path(
-            temporary_path
-        ).unlink(
-            missing_ok=True
-        )
+        Path(temporary_path).unlink(missing_ok=True)
     except OSError:
         pass
 
-def _read_workbook_sheets(
-        path: str,
-) -> list[str]:
+
+def _read_workbook_sheets(path: str) -> list[str]:
     workbook = pd.ExcelFile(path)
-
     if not workbook.sheet_names:
-        raise ValueError(
-            "The Excel workbook contains no sheets."
-        )
+        raise ValueError("The Excel workbook contains no sheets.")
+    return list(workbook.sheet_names)
 
-    return list(
-        workbook.sheet_names
-    )
 
-async def inspect_workbook(
-        file: UploadFile,
-) -> dict:
-    temporary_path, filename = (
-        await _materialize_upload(file)
-    )
-
+async def inspect_workbook(file: UploadFile) -> dict:
+    temporary_path, filename = await _materialize_upload(file)
     try:
-        sheets = _read_workbook_sheets(
-            temporary_path
-        )
-
+        sheets = _read_workbook_sheets(temporary_path)
         return {
             "status": "success",
             "filename": filename,
             "sheets": sheets,
         }
-
     finally:
-        _cleanup(
-            temporary_path
-        )
+        _cleanup(temporary_path)
+
 
 def _clarification_response(
         ingestion_result,
@@ -166,25 +116,41 @@ def _clarification_response(
         "sheet_name": sheet_name,
         "clarifications": [
             clarification.model_dump()
-            for clarification
-            in ingestion_result.clarifications
+            for clarification in ingestion_result.clarifications
         ],
-        "header_row_index": (
-            ingestion_result.header_row_index
-        ),
-        "header_row_confidence": (
-            ingestion_result.header_row_confidence
-        ),
+        "header_row_index": ingestion_result.header_row_index,
+        "header_row_confidence": ingestion_result.header_row_confidence,
     }
+
+
+def _describe_mapping(mapping) -> str:
+    """Plain-language summary of what column detection found."""
+    parts = ["Project"]
+    if mapping.region_col is not None:
+        parts.append("Region")
+    if mapping.has_revenue() and mapping.has_cost():
+        parts.append("revenue and cost months")
+    elif mapping.has_revenue():
+        parts.append("revenue months")
+    elif mapping.has_cost():
+        parts.append("cost months")
+    return ", ".join(parts)
+
+
+def _save_workspace(session, temporary_path: str) -> dict:
+    """Persist the finished analysis locally and return its metadata."""
+    try:
+        file_size = os.path.getsize(temporary_path)
+    except OSError:
+        file_size = None
+    return get_store().save(session.to_dict(), file_size=file_size)
+
 
 def _process_materialized_dataset(
         temporary_path: str,
         filename: str,
         sheet_name: str | None,
-        progress_callback: Callable[
-                               [str],
-                               None,
-                           ] | None = None,
+        progress_callback: ProgressCallback | None = None,
 ) -> dict:
     """
     Process an already-materialized Excel file.
@@ -195,65 +161,51 @@ def _process_materialized_dataset(
     It is executed in a worker thread by the async service.
     """
 
-    def emit(
-            stage: str,
-    ) -> None:
+    def emit(stage: str, detail: str | None = None) -> None:
         if progress_callback is not None:
-            progress_callback(
-                stage
-            )
+            progress_callback(stage, detail)
 
     # ---------------------------------------------------------
     # Stage 1
     # ---------------------------------------------------------
+    emit("Importing dataset")
 
-    emit(
-        "Importing dataset"
-    )
-
-    sheets = _read_workbook_sheets(
-        temporary_path
-    )
+    sheets = _read_workbook_sheets(temporary_path)
 
     if sheet_name is None:
-
         if len(sheets) > 1:
             return {
                 "status": "needs_sheet_selection",
                 "filename": filename,
                 "sheets": sheets,
             }
-
         sheet_name = sheets[0]
 
     if sheet_name not in sheets:
-        raise ValueError(
-            f"Sheet '{sheet_name}' does not exist "
-            f"in the workbook."
-        )
+        raise ValueError(f"Sheet '{sheet_name}' does not exist in the workbook.")
 
     # ---------------------------------------------------------
     # Stage 2
     # ---------------------------------------------------------
-
-    emit(
-        "Detecting columns"
-    )
+    emit("Detecting columns")
 
     ingestion_result, dataframe = run_ingestion_with_dataframe(
         path=temporary_path,
         sheet_name=sheet_name,
     )
 
-    if (
-            ingestion_result.status
-            == "needs_clarification"
-    ):
-        return _clarification_response(
-            ingestion_result,
-            filename,
-            sheet_name,
+    if ingestion_result.status == "needs_clarification":
+        return _clarification_response(ingestion_result, filename, sheet_name)
+
+    if dataframe is not None:
+        emit(
+            "Importing dataset",
+            f"{len(dataframe):,} rows · {len(dataframe.columns)} columns",
         )
+    emit(
+        "Detecting columns",
+        _describe_mapping(ingestion_result.column_mapping),
+    )
 
     # ---------------------------------------------------------
     # Stages 3 + 4
@@ -261,7 +213,6 @@ def _process_materialized_dataset(
     # precompute_dataset() emits the real project-wise and
     # region-wise stage transitions.
     # ---------------------------------------------------------
-
     session = precompute_dataset(
         file_path=temporary_path,
         sheet_name=sheet_name,
@@ -274,15 +225,15 @@ def _process_materialized_dataset(
     # ---------------------------------------------------------
     # Stage 5
     # ---------------------------------------------------------
+    emit("Finalizing results")
 
-    emit(
-        "Finalizing results"
-    )
+    workspace = _save_workspace(session, temporary_path)
 
     return {
         "status": "resolved",
-        "session": session.to_dict(),
+        "workspace": workspace,
     }
+
 
 async def process_dataset(
         file: UploadFile,
@@ -294,11 +245,7 @@ async def process_dataset(
     Kept for compatibility and backend testing.
     The frontend uses stream_process_dataset().
     """
-
-    temporary_path, filename = (
-        await _materialize_upload(file)
-    )
-
+    temporary_path, filename = await _materialize_upload(file)
     try:
         return await asyncio.to_thread(
             _process_materialized_dataset,
@@ -306,11 +253,9 @@ async def process_dataset(
             filename,
             sheet_name,
         )
-
     finally:
-        _cleanup(
-            temporary_path
-        )
+        _cleanup(temporary_path)
+
 
 async def _stream_materialized_dataset(
         temporary_path: str,
@@ -322,34 +267,23 @@ async def _stream_materialized_dataset(
 
     IMPORTANT:
     The UploadFile is NOT used here.
-
     The uploaded file was already copied to temporary_path before
     this generator was passed to StreamingResponse.
     """
-
-    queue: asyncio.Queue[
-        dict
-    ] = asyncio.Queue()
-
+    queue: asyncio.Queue[dict] = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
-    def emit(
-            stage: str,
-    ) -> None:
+    def emit(stage: str, detail: str | None = None) -> None:
         """
         Called by the synchronous worker thread.
 
         The callback safely schedules the event onto the
         asyncio event loop.
         """
-
-        loop.call_soon_threadsafe(
-            queue.put_nowait,
-            {
-                "type": "progress",
-                "stage": stage,
-            },
-        )
+        event: dict = {"type": "progress", "stage": stage}
+        if detail:
+            event["detail"] = detail
+        loop.call_soon_threadsafe(queue.put_nowait, event)
 
     async def worker() -> None:
         try:
@@ -360,61 +294,33 @@ async def _stream_materialized_dataset(
                 sheet_name,
                 emit,
             )
-
             loop.call_soon_threadsafe(
                 queue.put_nowait,
-                {
-                    "type": "result",
-                    "data": result,
-                },
+                {"type": "result", "data": result},
             )
-
         except Exception as exc:
-
             loop.call_soon_threadsafe(
                 queue.put_nowait,
-                {
-                    "type": "error",
-                    "message": str(exc),
-                },
+                {"type": "error", "message": str(exc)},
             )
-
         finally:
-            _cleanup(
-                temporary_path
-            )
+            _cleanup(temporary_path)
 
-    asyncio.create_task(
-        worker()
-    )
+    asyncio.create_task(worker())
 
     try:
-
         while True:
-
             event = await queue.get()
-
-            yield (
-                    json.dumps(
-                        event
-                    )
-                    + "\n"
-            )
-
-            if event["type"] in {
-                "result",
-                "error",
-            }:
+            yield json.dumps(event) + "\n"
+            if event["type"] in {"result", "error"}:
                 break
-
     except asyncio.CancelledError:
-
         # The client/browser may disconnect while processing.
         #
         # The worker owns cleanup of the temporary file, so we
         # do not delete it from this generator.
-
         raise
+
 
 async def stream_process_dataset(
         file: UploadFile,
@@ -423,111 +329,58 @@ async def stream_process_dataset(
     """
     Prepare the upload BEFORE returning the streaming generator.
 
-    This is the critical fix for:
-
-        ValueError: read of closed file
-
     FastAPI can close UploadFile after the route returns.
     Therefore UploadFile.read() must happen here, before the
     StreamingResponse is created.
     """
-
     temporary_path: str | None = None
-
     try:
+        # CRITICAL: read UploadFile NOW, while it is still open.
+        temporary_path, filename = await _materialize_upload(file)
 
-        # -----------------------------------------------------
-        # CRITICAL:
-        # Read UploadFile NOW, while it is still open.
-        # -----------------------------------------------------
-
-        temporary_path, filename = (
-            await _materialize_upload(file)
-        )
-
-        # -----------------------------------------------------
         # After this point the generator only works with the
-        # temporary filesystem path.
-        # It never touches UploadFile again.
-        # -----------------------------------------------------
-
+        # temporary filesystem path. It never touches UploadFile again.
         return _stream_materialized_dataset(
             temporary_path,
             filename,
             sheet_name,
         )
-
     except Exception:
-
         if temporary_path is not None:
-            _cleanup(
-                temporary_path
-            )
-
+            _cleanup(temporary_path)
         raise
+
 
 async def resolve_dataset(
         file: UploadFile,
         sheet_name: str,
         choices_json: str,
 ) -> dict:
-    temporary_path, filename = (
-        await _materialize_upload(file)
-    )
-
+    temporary_path, filename = await _materialize_upload(file)
     try:
-
-        sheets = _read_workbook_sheets(
-            temporary_path
-        )
+        sheets = _read_workbook_sheets(temporary_path)
 
         if sheet_name not in sheets:
-            raise ValueError(
-                f"Sheet '{sheet_name}' does not exist "
-                f"in the workbook."
-            )
+            raise ValueError(f"Sheet '{sheet_name}' does not exist in the workbook.")
 
         try:
-            choices = json.loads(
-                choices_json
-            )
-
+            choices = json.loads(choices_json)
         except json.JSONDecodeError as exc:
-            raise ValueError(
-                "Invalid clarification choices."
-            ) from exc
+            raise ValueError("Invalid clarification choices.") from exc
 
-        if not isinstance(
-                choices,
-                dict,
-        ):
-            raise ValueError(
-                "Clarification choices must be "
-                "a JSON object."
-            )
+        if not isinstance(choices, dict):
+            raise ValueError("Clarification choices must be a JSON object.")
 
-        normalized_choices = {
-            str(key): str(value)
-            for key, value in choices.items()
-        }
+        normalized_choices = {str(key): str(value) for key, value in choices.items()}
 
-        ingestion_result, dataframe = (
-            resolve_ingestion_with_choices_and_dataframe(
-                path=temporary_path,
-                sheet_name=sheet_name,
-                choices=normalized_choices,
-            )
+        ingestion_result, dataframe = resolve_ingestion_with_choices_and_dataframe(
+            path=temporary_path,
+            sheet_name=sheet_name,
+            choices=normalized_choices,
         )
 
-        if (
-                ingestion_result.status
-                == "needs_clarification"
-        ):
-            return _clarification_response(
-                ingestion_result,
-                filename,
-                sheet_name,
-            )
+        if ingestion_result.status == "needs_clarification":
+            return _clarification_response(ingestion_result, filename, sheet_name)
 
         session = precompute_dataset(
             file_path=temporary_path,
@@ -537,12 +390,11 @@ async def resolve_dataset(
             dataframe=dataframe,
         )
 
+        workspace = _save_workspace(session, temporary_path)
+
         return {
             "status": "resolved",
-            "session": session.to_dict(),
+            "workspace": workspace,
         }
-
     finally:
-        _cleanup(
-            temporary_path
-        )
+        _cleanup(temporary_path)

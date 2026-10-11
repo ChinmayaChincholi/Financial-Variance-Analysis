@@ -1,15 +1,8 @@
-export type Scope =
-  | "project"
-  | "region";
-
-export type Metric =
-  | "revenue"
-  | "cost";
-
-export type PeriodType =
-  | "MoM"
-  | "QoQ"
-  | "YoY";
+export type Scope = "project" | "region";
+export type Metric = "revenue" | "cost";
+export type PeriodType = "mom" | "qoq" | "yoy";
+/** "totals" is the per-project aggregate view (no comparison). */
+export type CompareType = PeriodType | "totals";
 
 export interface ColumnMapping {
   project_col: string;
@@ -32,49 +25,40 @@ export interface ClarificationRequest {
   allow_none?: boolean;
 }
 
-export interface DatasetMetadata {
-  filename: string;
-  sheet_name: string;
-  row_count: number;
-  column_count: number;
-}
-
 export interface PeriodOption {
   id: string;
   label: string;
+  /** Name of the comparison-view column holding the earlier period total. */
   start_period?: string;
+  /** Name of the comparison-view column holding the later period total. */
   end_period?: string;
 }
 
 export interface AnalysisRow {
-  [key: string]:
-    | string
-    | number
-    | null
-    | undefined;
+  [key: string]: string | number | null | undefined;
 }
 
-export interface AnalysisResult {
+export interface TableResult {
   rows: AnalysisRow[];
   columns: string[];
-  sum_to_reach?: number;
-  summary_sentence?: string;
+}
+
+export interface DriverSelection {
+  top: string[];
+  bottom: string[];
+}
+
+export interface PeriodAnalysis extends TableResult {
+  sum_to_reach: number;
+  summary_sentence: string;
+  drivers: DriverSelection;
 }
 
 export interface MetricAnalysis {
-  unique: AnalysisResult | null;
-  mom: Record<
-    string,
-    AnalysisResult
-  >;
-  qoq: Record<
-    string,
-    AnalysisResult
-  >;
-  yoy: Record<
-    string,
-    AnalysisResult
-  >;
+  unique: TableResult | null;
+  mom: Record<string, PeriodAnalysis>;
+  qoq: Record<string, PeriodAnalysis>;
+  yoy: Record<string, PeriodAnalysis>;
 }
 
 export interface MetricPeriods {
@@ -83,33 +67,49 @@ export interface MetricPeriods {
   yoy: PeriodOption[];
 }
 
-export interface ProjectWiseAnalysis {
-  revenue: MetricAnalysis;
-  cost: MetricAnalysis;
+export interface DatasetSummary {
+  unique_projects: number;
+  row_count: number;
+  column_count: number;
+  regions: string[];
+  first_month: string | null;
+  last_month: string | null;
+  month_count: number;
+  metrics: Metric[];
+  comparisons: Record<PeriodType, number>;
 }
 
-export interface RegionWiseAnalysis {
-  [region: string]: {
-    revenue: MetricAnalysis;
-    cost: MetricAnalysis;
-  };
+export interface DatasetMetadata {
+  filename: string;
+  sheet_name: string;
+  row_count: number;
+  column_count: number;
 }
 
 export interface DatasetSession {
   dataset: DatasetMetadata;
-
   mapping: ColumnMapping;
-
   regions: string[];
+  periods: Record<Metric, MetricPeriods>;
+  projectWise: Record<Metric, MetricAnalysis>;
+  regionWise: Record<string, Record<Metric, MetricAnalysis>>;
+  summary: DatasetSummary;
+}
 
-  periods: {
-    revenue: MetricPeriods;
-    cost: MetricPeriods;
-  };
+export interface WorkspaceMeta {
+  id: string;
+  name: string;
+  filename: string;
+  sheet_name: string;
+  file_size: number | null;
+  created_at: string;
+  last_opened_at: string;
+  summary: DatasetSummary;
+}
 
-  projectWise: ProjectWiseAnalysis;
-
-  regionWise: RegionWiseAnalysis;
+export interface WorkspaceDetail {
+  meta: WorkspaceMeta;
+  session: DatasetSession;
 }
 
 export type IngestionStatus =
@@ -119,41 +119,23 @@ export type IngestionStatus =
 
 export interface IngestionResponse {
   status: IngestionStatus;
-
-  session?: DatasetSession;
-
+  workspace?: WorkspaceMeta;
   clarifications?: ClarificationRequest[];
-
   sheets?: string[];
-
   filename?: string;
-
   sheet_name?: string;
-
   header_row_index?: number | null;
-
   header_row_confidence?: number | null;
 }
 
-export interface WorkbookInspectionResponse {
-  status: "success";
-  filename: string;
-  sheets: string[];
-}
-
-
 /*
- * ------------------------------------------------------------
- * Real processing-stream events
- * ------------------------------------------------------------
- *
- * The backend deliberately does not send fake percentage
- * progress. It sends only real stage transitions.
+ * Real processing-stream events. The backend never sends fake percentage
+ * progress, only genuine stage transitions (plus optional detail text).
  */
-
 export interface DatasetProgressEvent {
   type: "progress";
   stage: string;
+  detail?: string;
 }
 
 export interface DatasetResultEvent {

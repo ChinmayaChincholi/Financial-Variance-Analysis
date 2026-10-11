@@ -1,162 +1,111 @@
 import { create } from "zustand";
+import type { ClarificationRequest } from "../types/dataset";
 
-import type {
-  ClarificationRequest,
-  DatasetSession,
-} from "../types/dataset";
+/**
+ * State of the "conversation" (attach -> processing -> questions) only.
+ * Finished analyses live on the backend as workspaces, not in memory.
+ */
+export type Phase =
+  | "idle"
+  | "processing"
+  | "sheet"
+  | "clarify"
+  | "resolving"
+  | "error";
 
-interface AnalysisState {
+interface ConversationState {
+  phase: Phase;
   file: File | null;
-
-  session: DatasetSession | null;
-
   sheets: string[];
-
   selectedSheet: string | null;
-
   clarifications: ClarificationRequest[];
-
-  clarificationChoices: Record<
-    string,
-    string
-  >;
-
-  processing: boolean;
-
-  processingStage: string;
-
+  choices: Record<string, string>;
+  /** Index (into the UI step list) of the stage the backend is on. */
+  stageIndex: number;
+  stageDetails: Record<string, string>;
+  startedAt: number | null;
   error: string | null;
 
-  setFile: (file: File | null) => void;
-
-  setSession: (
-    session: DatasetSession,
-  ) => void;
-
-  setSheets: (sheets: string[]) => void;
-
-  setSelectedSheet: (
-    sheet: string | null,
-  ) => void;
-
-  setClarifications: (
+  begin: (file: File, sheet?: string) => void;
+  progress: (stage: string, detail?: string) => void;
+  needSheet: (sheets: string[]) => void;
+  needClarification: (
+    sheetName: string,
     clarifications: ClarificationRequest[],
   ) => void;
-
-  setClarificationChoice: (
-    field: string,
-    value: string,
-  ) => void;
-
-  setProcessing: (
-    processing: boolean,
-    stage?: string,
-  ) => void;
-
-  setError: (
-    error: string | null,
-  ) => void;
-
+  choose: (field: string, value: string) => void;
+  resolving: () => void;
+  fail: (message: string) => void;
+  finish: () => void;
   reset: () => void;
 }
 
-export const useAnalysisStore =
-  create<AnalysisState>((set) => ({
-    file: null,
+/** Backend stage names, in the order the backend reports them. */
+export const BACKEND_STAGES = [
+  "Importing dataset",
+  "Detecting columns",
+  "Computing project-wise analysis",
+  "Computing region-wise analysis",
+  "Finalizing results",
+] as const;
 
-    session: null,
+const initial = {
+  phase: "idle" as Phase,
+  file: null,
+  sheets: [] as string[],
+  selectedSheet: null,
+  clarifications: [] as ClarificationRequest[],
+  choices: {} as Record<string, string>,
+  stageIndex: 0,
+  stageDetails: {} as Record<string, string>,
+  startedAt: null,
+  error: null,
+};
 
-    sheets: [],
+export const useAnalysisStore = create<ConversationState>((set) => ({
+  ...initial,
 
-    selectedSheet: null,
+  begin: (file, sheet) =>
+    set({
+      ...initial,
+      phase: "processing",
+      file,
+      selectedSheet: sheet ?? null,
+      startedAt: Date.now(),
+    }),
 
-    clarifications: [],
+  progress: (stage, detail) =>
+    set((state) => {
+      const index = BACKEND_STAGES.indexOf(
+        stage as (typeof BACKEND_STAGES)[number],
+      );
+      return {
+        stageIndex: index > state.stageIndex ? index : state.stageIndex,
+        stageDetails: detail
+          ? { ...state.stageDetails, [stage]: detail }
+          : state.stageDetails,
+      };
+    }),
 
-    clarificationChoices: {},
+  needSheet: (sheets) => set({ phase: "sheet", sheets, error: null }),
 
-    processing: false,
-
-    processingStage: "",
-
-    error: null,
-
-    setFile: (file) =>
-      set({
-        file,
-        session: null,
-        sheets: [],
-        selectedSheet: null,
-        clarifications: [],
-        clarificationChoices: {},
-        processing: false,
-        processingStage: "",
-        error: null,
-      }),
-
-    setSession: (session) =>
-      set({
-        session,
-        clarifications: [],
-        clarificationChoices: {},
-        processing: false,
-        processingStage: "",
-        error: null,
-      }),
-
-    setSheets: (sheets) =>
-      set({
-        sheets,
-      }),
-
-    setSelectedSheet: (selectedSheet) =>
-      set({
-        selectedSheet,
-      }),
-
-    setClarifications: (
+  needClarification: (sheetName, clarifications) =>
+    set({
+      phase: "clarify",
+      selectedSheet: sheetName,
       clarifications,
-    ) =>
-      set({
-        clarifications,
-      }),
+      choices: {},
+      error: null,
+    }),
 
-    setClarificationChoice: (
-      field,
-      value,
-    ) =>
-      set((state) => ({
-        clarificationChoices: {
-          ...state.clarificationChoices,
-          [field]: value,
-        },
-      })),
+  choose: (field, value) =>
+    set((state) => ({ choices: { ...state.choices, [field]: value } })),
 
-    setProcessing: (
-      processing,
-      stage = "",
-    ) =>
-      set({
-        processing,
-        processingStage: stage,
-      }),
+  resolving: () => set({ phase: "resolving", startedAt: Date.now() }),
 
-    setError: (error) =>
-      set({
-        error,
-        processing: false,
-        processingStage: "",
-      }),
+  fail: (message) => set({ phase: "error", error: message }),
 
-    reset: () =>
-      set({
-        file: null,
-        session: null,
-        sheets: [],
-        selectedSheet: null,
-        clarifications: [],
-        clarificationChoices: {},
-        processing: false,
-        processingStage: "",
-        error: null,
-      }),
-  }));
+  finish: () => set({ ...initial }),
+
+  reset: () => set({ ...initial }),
+}));
