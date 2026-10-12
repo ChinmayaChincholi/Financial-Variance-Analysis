@@ -1,11 +1,14 @@
 import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
-import type { TableResult } from "../types/dataset";
-import { formatNumber } from "../utils/formatting";
+import type { CurrencyInfo, TableResult } from "../types/dataset";
+import type { RegionColumn } from "../utils/analysisModel";
+import { currencyCaption, formatMoney, toNumber } from "../utils/formatting";
 
-interface TotalsTableProps {
+interface AllProjectsTableProps {
   table: TableResult;
   projectColumn: string;
+  currency: CurrencyInfo;
+  regionColumn: RegionColumn | null;
   exporting: boolean;
   exportError: string | null;
   onExport: () => void;
@@ -13,13 +16,15 @@ interface TotalsTableProps {
 
 const MAX_RENDERED_ROWS = 500;
 
-export function TotalsTable({
+export function AllProjectsTable({
   table,
   projectColumn,
+  currency,
+  regionColumn,
   exporting,
   exportError,
   onExport,
-}: TotalsTableProps) {
+}: AllProjectsTableProps) {
   const [query, setQuery] = useState("");
 
   const matches = useMemo(() => {
@@ -37,7 +42,8 @@ export function TotalsTable({
     <div className="card table-card">
       <div className="table-head">
         <span className="muted">
-          {matches.length.toLocaleString("en-IN")} projects
+          All projects · {matches.length.toLocaleString("en-US")} projects ·{" "}
+          {currencyCaption(currency)}
         </span>
         <button
           type="button"
@@ -65,24 +71,35 @@ export function TotalsTable({
       />
 
       <div className="table-scroll tall">
-        <table>
+        <table className="sticky-first">
           <thead>
             <tr>
-              {table.columns.map((column) => (
-                <th key={column}>{column}</th>
-              ))}
+              <th>{projectColumn}</th>
+              {regionColumn && <th>{regionColumn.name}</th>}
+              {table.columns
+                .filter((column) => column !== projectColumn)
+                .map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
             </tr>
           </thead>
           <tbody>
             {shown.map((row, index) => (
               <tr key={index}>
-                {table.columns.map((column) => (
-                  <td key={column}>
-                    {column === projectColumn
-                      ? String(row[column] ?? "-")
-                      : formatNumber(row[column])}
-                  </td>
-                ))}
+                <td>{String(row[projectColumn] ?? "-")}</td>
+                {regionColumn && <td>{regionColumn.value}</td>}
+                {table.columns
+                  .filter((column) => column !== projectColumn)
+                  .map((column) => {
+                    const value = row[column];
+                    return (
+                      <td key={column}>
+                        {value === null || value === undefined || value === ""
+                          ? "-"
+                          : formatMoney(toNumber(value), currency)}
+                      </td>
+                    );
+                  })}
               </tr>
             ))}
           </tbody>

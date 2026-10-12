@@ -1,6 +1,6 @@
 import {
   processDatasetWithProgress,
-  resolveDataset,
+  resolveDatasetWithProgress,
 } from "./api/datasetApi";
 import { useAnalysisStore } from "../state/analysisStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -94,10 +94,15 @@ export async function submitClarifications(): Promise<WorkspaceMeta | null> {
   useAnalysisStore.getState().resolving();
 
   try {
-    const response = await resolveDataset(
+    const response = await resolveDatasetWithProgress(
       file,
       choices,
       selectedSheet,
+      (event) => {
+        if (!signal.aborted) {
+          useAnalysisStore.getState().progress(event.stage, event.detail);
+        }
+      },
       signal,
     );
     if (signal.aborted) return null;

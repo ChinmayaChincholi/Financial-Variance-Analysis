@@ -257,13 +257,12 @@ async def process_dataset(
         _cleanup(temporary_path)
 
 
-async def _stream_materialized_dataset(
+async def _stream_job(
         temporary_path: str,
-        filename: str,
-        sheet_name: str | None,
+        job: Callable[[ProgressCallback], dict],
 ) -> AsyncIterator[str]:
     """
-    Stream processing events from an already-materialized file.
+    Run `job` in a worker thread and stream its events as NDJSON.
 
     IMPORTANT:
     The UploadFile is NOT used here.
@@ -287,13 +286,7 @@ async def _stream_materialized_dataset(
 
     async def worker() -> None:
         try:
-            result = await asyncio.to_thread(
-                _process_materialized_dataset,
-                temporary_path,
-                filename,
-                sheet_name,
-                emit,
-            )
+            result = await asyncio.to_thread(job, emit)
             loop.call_soon_threadsafe(
                 queue.put_nowait,
                 {"type": "result", "data": result},
@@ -338,17 +331,128 @@ async def stream_process_dataset(
         # CRITICAL: read UploadFile NOW, while it is still open.
         temporary_path, filename = await _materialize_upload(file)
 
+        def job(emit: ProgressCallback) -> dict:
+            return _process_materialized_dataset(
+                temporary_path,
+                filename,
+                sheet_name,
+                emit,
+            )
+
         # After this point the generator only works with the
         # temporary filesystem path. It never touches UploadFile again.
-        return _stream_materialized_dataset(
-            temporary_path,
-            filename,
-            sheet_name,
-        )
+        return _stream_job(temporary_path, job)
     except Exception:
         if temporary_path is not None:
             _cleanup(temporary_path)
         raise
+
+
+async def stream_resolve_dataset(
+        file: UploadFile,
+        sheet_name: str,
+        choices_json: str,
+) -> AsyncIterator[str]:
+    """
+    Streaming version of resolve_dataset().
+
+    After the user answers the clarification questions, the remaining
+    processing stages are streamed exactly like the first pass, so the
+    progress checklist continues from where it stopped.
+    """
+    temporary_path: str | None = None
+    try:
+        temporary_path, filename = await _materialize_upload(file)
+
+        def job(emit: ProgressCallback) -> dict:
+            return _resolve_materialized_dataset(
+                temporary_path,
+                filename,
+                sheet_name,
+                choices_json,
+                emit,
+            )
+
+        return _stream_job(temporary_path, job)
+    except Exception:
+        if temporary_path is not None:
+            _cleanup(temporary_path)
+        raise
+
+
+def _resolve_materialized_dataset(
+        temporary_path: str,
+        filename: str,
+        sheet_name: str,
+        choices_json: str,
+        progress_callback: ProgressCallback | None = None,
+) -> dict:
+    """
+    Apply the user's clarification choices to an already-materialized file,
+    then finish the analysis (same stages as the first pass).
+
+    Synchronous (pandas / analysis work); run it in a worker thread.
+    """
+
+    def emit(stage: str, detail: str | None = None) -> None:
+        if progress_callback is not None:
+            progress_callback(stage, detail)
+
+    sheets = _read_workbook_sheets(temporary_path)
+
+    if sheet_name not in sheets:
+        raise ValueError(f"Sheet '{sheet_name}' does not exist in the workbook.")
+
+    try:
+        choices = json.loads(choices_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Invalid clarification choices.") from exc
+
+    if not isinstance(choices, dict):
+        raise ValueError("Clarification choices must be a JSON object.")
+
+    normalized_choices = {str(key): str(value) for key, value in choices.items()}
+
+    # The first two stages were already shown before the questions;
+    # repeating them is harmless (the UI only ever moves forward).
+    emit("Detecting columns")
+
+    ingestion_result, dataframe = resolve_ingestion_with_choices_and_dataframe(
+        path=temporary_path,
+        sheet_name=sheet_name,
+        choices=normalized_choices,
+    )
+
+    if ingestion_result.status == "needs_clarification":
+        return _clarification_response(ingestion_result, filename, sheet_name)
+
+    if dataframe is not None:
+        emit(
+            "Importing dataset",
+            f"{len(dataframe):,} rows · {len(dataframe.columns)} columns",
+        )
+    emit(
+        "Detecting columns",
+        _describe_mapping(ingestion_result.column_mapping),
+    )
+
+    session = precompute_dataset(
+        file_path=temporary_path,
+        sheet_name=sheet_name,
+        ingestion_result=ingestion_result,
+        filename=filename,
+        progress_callback=progress_callback,
+        dataframe=dataframe,
+    )
+
+    emit("Finalizing results")
+
+    workspace = _save_workspace(session, temporary_path)
+
+    return {
+        "status": "resolved",
+        "workspace": workspace,
+    }
 
 
 async def resolve_dataset(
@@ -356,45 +460,15 @@ async def resolve_dataset(
         sheet_name: str,
         choices_json: str,
 ) -> dict:
+    """Non-streaming resolve. The frontend uses stream_resolve_dataset()."""
     temporary_path, filename = await _materialize_upload(file)
     try:
-        sheets = _read_workbook_sheets(temporary_path)
-
-        if sheet_name not in sheets:
-            raise ValueError(f"Sheet '{sheet_name}' does not exist in the workbook.")
-
-        try:
-            choices = json.loads(choices_json)
-        except json.JSONDecodeError as exc:
-            raise ValueError("Invalid clarification choices.") from exc
-
-        if not isinstance(choices, dict):
-            raise ValueError("Clarification choices must be a JSON object.")
-
-        normalized_choices = {str(key): str(value) for key, value in choices.items()}
-
-        ingestion_result, dataframe = resolve_ingestion_with_choices_and_dataframe(
-            path=temporary_path,
-            sheet_name=sheet_name,
-            choices=normalized_choices,
+        return await asyncio.to_thread(
+            _resolve_materialized_dataset,
+            temporary_path,
+            filename,
+            sheet_name,
+            choices_json,
         )
-
-        if ingestion_result.status == "needs_clarification":
-            return _clarification_response(ingestion_result, filename, sheet_name)
-
-        session = precompute_dataset(
-            file_path=temporary_path,
-            sheet_name=sheet_name,
-            ingestion_result=ingestion_result,
-            filename=filename,
-            dataframe=dataframe,
-        )
-
-        workspace = _save_workspace(session, temporary_path)
-
-        return {
-            "status": "resolved",
-            "workspace": workspace,
-        }
     finally:
         _cleanup(temporary_path)

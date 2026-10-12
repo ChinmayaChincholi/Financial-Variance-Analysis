@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
+import { AllProjectsTable } from "../components/AllProjectsTable";
 import { Ring } from "../components/Brand";
-import { DetailTable } from "../components/DetailTable";
+import { BreakdownTable } from "../components/BreakdownTable";
 import { FilterBar } from "../components/FilterBar";
 import { SentenceText } from "../components/SentenceCard";
-import { TotalsTable } from "../components/TotalsTable";
 import { BridgeChart } from "../components/charts/BridgeChart";
-import { VarianceBars } from "../components/charts/VarianceBars";
+import { TrendChart } from "../components/charts/TrendChart";
 import { exportAnalysisToExcel } from "../services/api/exportApi";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import type { WorkspaceDetail } from "../types/dataset";
@@ -15,18 +15,20 @@ import {
   METRIC_LABEL,
   buildBridge,
   buildDetailRows,
-  buildMovers,
+  buildTrend,
   filtersToParams,
   makeExportFilename,
+  regionColumnFor,
   resolveFilters,
   scopeLabel,
   stateToRaw,
+  withRegionColumn,
   type RawFilters,
 } from "../utils/analysisModel";
 import { getErrorMessage } from "../utils/errors";
 import {
-  chooseUnit,
-  formatSignedCompact,
+  DEFAULT_CURRENCY,
+  formatSignedMoney,
   toNumber,
 } from "../utils/formatting";
 
@@ -88,6 +90,8 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  const currency = session.summary.currency ?? DEFAULT_CURRENCY;
+
   const resolved = useMemo(
     () =>
       resolveFilters(session, {
@@ -96,6 +100,7 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
         region: params.get("region"),
         compare: params.get("compare"),
         period: params.get("period"),
+        all: params.get("all"),
       }),
     [session, params],
   );
@@ -119,11 +124,12 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
 
   const { state, analysis, option, period } = resolved;
   const projectCol = session.mapping.project_col;
+  const regionColumn = regionColumnFor(session, state);
 
   const context = [
     METRIC_LABEL[state.metric],
     scopeLabel(state),
-    state.compare === "totals" ? "Project totals" : option?.label,
+    state.allProjects ? "Monthly totals" : option?.label,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -132,36 +138,23 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
     if (!period || !option) return null;
     return {
       bridge: buildBridge(period, projectCol, option),
-      movers: buildMovers(period, projectCol),
+      trend: buildTrend(session, state, option),
       rows: buildDetailRows(period, projectCol, option),
     };
-  }, [period, option, projectCol]);
-
-  const unit = useMemo(() => {
-    if (!model?.bridge) {
-      const largest = model?.rows.reduce(
-        (max, row) => Math.max(max, Math.abs(row.start), Math.abs(row.end)),
-        0,
-      );
-      return chooseUnit(largest ?? 0);
-    }
-    return chooseUnit(
-      Math.max(
-        Math.abs(model.bridge.start),
-        Math.abs(model.bridge.end),
-        Math.abs(model.bridge.net),
-      ),
-    );
-  }, [model]);
+  }, [period, option, projectCol, session, state]);
 
   async function runExport() {
-    const table = state.compare === "totals" ? analysis?.unique : period;
-    if (!table) return;
+    const source = state.allProjects ? analysis?.unique : period;
+    if (!source) return;
     setExporting(true);
     setExportError(null);
     try {
       await exportAnalysisToExcel(
-        { rows: table.rows, columns: table.columns },
+        withRegionColumn(
+          { rows: source.rows, columns: source.columns },
+          projectCol,
+          regionColumn,
+        ),
         makeExportFilename(meta.name, state, option),
       );
     } catch (reason) {
@@ -173,6 +166,7 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
 
   const net = period ? toNumber(period.sum_to_reach) : 0;
   const totals = analysis?.unique ?? null;
+  const legacy = !session.trend;
 
   return (
     <div className="analysis">
@@ -187,7 +181,7 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
         onChange={update}
       />
 
-      {state.compare === "totals" ? (
+      {state.allProjects ? (
         totals ? (
           <>
             <div className="card hero">
@@ -195,14 +189,16 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
                 <span className="pill">{context}</span>
               </div>
               <p className="hero-sentence">
-                Aggregated {METRIC_LABEL[state.metric].toLowerCase()} for every
-                unique project, from {totals.columns[1]} to{" "}
+                Monthly {METRIC_LABEL[state.metric].toLowerCase()} for every
+                project, from {totals.columns[1]} to{" "}
                 {totals.columns[totals.columns.length - 1]}.
               </p>
             </div>
-            <TotalsTable
+            <AllProjectsTable
               table={totals}
               projectColumn={projectCol}
+              currency={currency}
+              regionColumn={regionColumn}
               exporting={exporting}
               exportError={exportError}
               onExport={() => void runExport()}
@@ -217,24 +213,46 @@ function AnalysisView({ detail }: { detail: WorkspaceDetail }) {
             <div className="hero-top">
               <span className="pill">{context}</span>
               <span className={`big ${net >= 0 ? "up" : "dn"}`}>
-                {formatSignedCompact(net)}
+                {formatSignedMoney(net, currency)}
               </span>
             </div>
             <p className="hero-sentence">
-              <SentenceText sentence={period.summary_sentence} />
+              <SentenceText
+                sentence={period.summary_sentence}
+                currency={currency}
+              />
             </p>
           </div>
 
           <div className="charts">
-            {model.bridge && <BridgeChart model={model.bridge} unit={unit} />}
-            <VarianceBars items={model.movers} unit={unit} />
+            {model.bridge && (
+              <BridgeChart model={model.bridge} currency={currency} />
+            )}
+            {model.trend ? (
+              <TrendChart model={model.trend} currency={currency} />
+            ) : (
+              legacy && (
+                <div className="card chart-card notice-card" role="note">
+                  <div className="chart-head">
+                    <span>Monthly trend</span>
+                  </div>
+                  <p className="muted">
+                    This workspace was saved before monthly trends and currency
+                    detection existed. Re-import the file to add them. Amounts
+                    are shown in {currency.symbol || "the dataset's currency"}{" "}
+                    until then.
+                  </p>
+                </div>
+              )
+            )}
           </div>
 
-          <DetailTable
+          <BreakdownTable
             rows={model.rows}
             startLabel={option.start_period ?? "Start"}
             endLabel={option.end_period ?? "End"}
-            unit={unit}
+            currency={currency}
+            regionColumn={regionColumn}
             exporting={exporting}
             exportError={exportError}
             onExport={() => void runExport()}

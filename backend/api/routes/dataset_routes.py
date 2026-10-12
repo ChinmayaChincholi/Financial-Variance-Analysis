@@ -21,13 +21,18 @@ from services.dataset_service import (
     process_dataset,
     resolve_dataset,
     stream_process_dataset,
+    stream_resolve_dataset,
 )
-
 
 router = APIRouter(
     prefix="/api/dataset",
     tags=["Dataset"],
 )
+
+_STREAM_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+}
 
 
 @router.post("/sheets")
@@ -35,20 +40,15 @@ async def inspect_uploaded_workbook(
         file: UploadFile = File(...),
 ):
     try:
-
         return await inspect_workbook(
             file
         )
-
     except ValueError as exc:
-
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
-
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail=(
@@ -66,21 +66,16 @@ async def process_uploaded_dataset(
         ),
 ):
     try:
-
         return await process_dataset(
             file,
             sheet_name=sheet_name,
         )
-
     except ValueError as exc:
-
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
-
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail=(
@@ -108,34 +103,22 @@ async def stream_uploaded_dataset(
     Therefore the stream never tries to read an already-closed
     FastAPI UploadFile.
     """
-
     try:
-
         stream = await stream_process_dataset(
             file,
             sheet_name=sheet_name,
         )
-
         return StreamingResponse(
             stream,
-            media_type=(
-                "application/x-ndjson"
-            ),
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            media_type="application/x-ndjson",
+            headers=_STREAM_HEADERS,
         )
-
     except ValueError as exc:
-
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
-
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail=(
@@ -152,26 +135,58 @@ async def resolve_uploaded_dataset(
         choices: str = Form(...),
 ):
     try:
-
         return await resolve_dataset(
             file=file,
             sheet_name=sheet_name,
             choices_json=choices,
         )
-
     except ValueError as exc:
-
         raise HTTPException(
             status_code=400,
             detail=str(exc),
         ) from exc
-
     except Exception as exc:
-
         raise HTTPException(
             status_code=500,
             detail=(
                 "An unexpected error occurred "
                 "while resolving the dataset."
+            ),
+        ) from exc
+
+
+@router.post("/resolve/stream")
+async def stream_resolved_dataset(
+        file: UploadFile = File(...),
+        sheet_name: str = Form(...),
+        choices: str = Form(...),
+):
+    """
+    Apply the user's clarification answers and stream the remaining
+    processing stages, so the progress checklist can continue from
+    where it stopped.
+    """
+    try:
+        stream = await stream_resolve_dataset(
+            file=file,
+            sheet_name=sheet_name,
+            choices_json=choices,
+        )
+        return StreamingResponse(
+            stream,
+            media_type="application/x-ndjson",
+            headers=_STREAM_HEADERS,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "An unexpected error occurred "
+                "while preparing dataset resolution."
             ),
         ) from exc

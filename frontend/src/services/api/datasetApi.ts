@@ -1,4 +1,4 @@
-import { apiRequest, API_BASE_URL, readErrorMessage } from "./client";
+import { API_BASE_URL, readErrorMessage } from "./client";
 import type {
   DatasetProgressEvent,
   DatasetStreamEvent,
@@ -15,20 +15,20 @@ function buildForm(file: File, sheetName?: string): FormData {
 }
 
 /**
- * Process a dataset while receiving real backend stage events.
+ * POST a file and read the backend's NDJSON stream of real stage events.
  *
  * The backend uses NDJSON because the request is a multipart POST. That
  * gives streaming progress without a second websocket/SSE connection.
  */
-export async function processDatasetWithProgress(
-  file: File,
-  sheetName: string | undefined,
+async function streamIngestion(
+  path: string,
+  formData: FormData,
   onProgress: (event: DatasetProgressEvent) => void,
   signal?: AbortSignal,
 ): Promise<IngestionResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/dataset/process/stream`, {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    body: buildForm(file, sheetName),
+    body: formData,
     signal,
     headers: { Accept: "application/x-ndjson" },
   });
@@ -85,18 +85,35 @@ export async function processDatasetWithProgress(
   return finalResponse;
 }
 
-export async function resolveDataset(
+/** First pass: import, detect columns, and (if sure) analyse. */
+export function processDatasetWithProgress(
+  file: File,
+  sheetName: string | undefined,
+  onProgress: (event: DatasetProgressEvent) => void,
+  signal?: AbortSignal,
+): Promise<IngestionResponse> {
+  return streamIngestion(
+    "/api/dataset/process/stream",
+    buildForm(file, sheetName),
+    onProgress,
+    signal,
+  );
+}
+
+/** Second pass: apply the user's answers and stream the remaining stages. */
+export function resolveDatasetWithProgress(
   file: File,
   choices: Record<string, string>,
   sheetName: string,
+  onProgress: (event: DatasetProgressEvent) => void,
   signal?: AbortSignal,
 ): Promise<IngestionResponse> {
   const formData = buildForm(file, sheetName);
   formData.append("choices", JSON.stringify(choices));
-
-  return apiRequest<IngestionResponse>("/api/dataset/resolve", {
-    method: "POST",
-    body: formData,
+  return streamIngestion(
+    "/api/dataset/resolve/stream",
+    formData,
+    onProgress,
     signal,
-  });
+  );
 }

@@ -6,8 +6,8 @@ import type {
   MetricAnalysis,
   PeriodAnalysis,
   PeriodOption,
-  PeriodType,
   Scope,
+  TableResult,
 } from "../types/dataset";
 import { toNumber } from "./formatting";
 
@@ -45,17 +45,10 @@ export const COMPARE_META: Record<
       "Year-on-Year is unavailable: it needs two complete fiscal years.",
     footnote: "Only consecutive complete fiscal years are listed.",
   },
-  totals: {
-    short: "Totals",
-    long: "Project totals",
-    unavailable:
-      "Totals are unavailable: no month columns were found for this metric.",
-    footnote: "",
-  },
 };
 
-export const COMPARE_ORDER: CompareType[] = ["mom", "qoq", "yoy", "totals"];
-const DEFAULT_COMPARE_ORDER: CompareType[] = ["qoq", "mom", "yoy", "totals"];
+export const COMPARE_ORDER: CompareType[] = ["mom", "qoq", "yoy"];
+const DEFAULT_COMPARE_ORDER: CompareType[] = ["qoq", "mom", "yoy"];
 const METRICS: Metric[] = ["revenue", "cost"];
 const SCOPES: Scope[] = ["project", "region"];
 
@@ -65,6 +58,8 @@ export interface RawFilters {
   region?: string | null;
   compare?: string | null;
   period?: string | null;
+  /** "1" shows the All Projects (monthly totals) view. */
+  all?: string | null;
 }
 
 export interface FilterState {
@@ -73,6 +68,7 @@ export interface FilterState {
   region: string | null;
   compare: CompareType;
   periodId: string | null;
+  allProjects: boolean;
 }
 
 export interface Resolved {
@@ -85,6 +81,15 @@ export interface Resolved {
   metricAvailable: Record<Metric, boolean>;
   scopeAvailable: Record<Scope, boolean>;
   compareAvailable: Record<CompareType, boolean>;
+  allProjectsAvailable: boolean;
+  /** True when no comparison exists, so only monthly totals can be shown. */
+  allProjectsForced: boolean;
+  /** Plain-language reasons shown when an option is unavailable. */
+  reasons: {
+    metric: Record<Metric, string>;
+    region: string;
+    allProjects: string;
+  };
 }
 
 function hasData(analysis: MetricAnalysis | undefined | null): boolean {
@@ -101,7 +106,11 @@ function isOneOf<T extends string>(
   value: string | null | undefined,
   allowed: readonly T[],
 ): value is T {
-  return value !== null && value !== undefined && (allowed as readonly string[]).includes(value);
+  return (
+    value !== null &&
+    value !== undefined &&
+    (allowed as readonly string[]).includes(value)
+  );
 }
 
 function analysisFor(
@@ -120,13 +129,30 @@ function validOptions(
   session: DatasetSession,
   analysis: MetricAnalysis | null,
   metric: Metric,
-  type: PeriodType,
+  type: CompareType,
 ): PeriodOption[] {
   if (!analysis) return [];
   const results = analysis[type] ?? {};
   return (session.periods[metric]?.[type] ?? []).filter(
     (option) => results[option.id] !== undefined,
   );
+}
+
+function metricReason(
+  session: DatasetSession,
+  metric: Metric,
+  available: boolean,
+): string {
+  const label = METRIC_LABEL[metric];
+  const columns =
+    metric === "revenue"
+      ? session.mapping.revenue_month_year_cols
+      : session.mapping.cost_month_year_cols;
+  if (available) return "";
+  if (columns.length === 0) {
+    return `${label} not found in this Excel file. None of its month columns were identified as ${metric}.`;
+  }
+  return `${label} has no usable months yet. Its month columns were found, but none are complete enough to analyze.`;
 }
 
 /**
@@ -142,11 +168,12 @@ export function resolveFilters(
     revenue: hasData(session.projectWise.revenue),
     cost: hasData(session.projectWise.cost),
   };
-  const metric: Metric = isOneOf(raw.metric, METRICS) && metricAvailable[raw.metric]
-    ? raw.metric
-    : metricAvailable.revenue || !metricAvailable.cost
-      ? "revenue"
-      : "cost";
+  const metric: Metric =
+    isOneOf(raw.metric, METRICS) && metricAvailable[raw.metric]
+      ? raw.metric
+      : metricAvailable.revenue || !metricAvailable.cost
+        ? "revenue"
+        : "cost";
 
   const regionAvailable =
     Boolean(session.mapping.region_col) && session.regions.length > 0;
@@ -168,7 +195,7 @@ export function resolveFilters(
 
   const analysis = analysisFor(session, metric, scope, region);
 
-  const optionsByType: Record<PeriodType, PeriodOption[]> = {
+  const optionsByType: Record<CompareType, PeriodOption[]> = {
     mom: validOptions(session, analysis, metric, "mom"),
     qoq: validOptions(session, analysis, metric, "qoq"),
     yoy: validOptions(session, analysis, metric, "yoy"),
@@ -177,26 +204,26 @@ export function resolveFilters(
     mom: optionsByType.mom.length > 0,
     qoq: optionsByType.qoq.length > 0,
     yoy: optionsByType.yoy.length > 0,
-    totals: Boolean(analysis?.unique),
   };
 
   const compare: CompareType =
     isOneOf(raw.compare, COMPARE_ORDER) && compareAvailable[raw.compare]
       ? raw.compare
-      : DEFAULT_COMPARE_ORDER.find((type) => compareAvailable[type]) ?? "totals";
+      : DEFAULT_COMPARE_ORDER.find((type) => compareAvailable[type]) ?? "qoq";
 
-  let options: PeriodOption[] = [];
-  let option: PeriodOption | null = null;
-  let period: PeriodAnalysis | null = null;
+  const options = optionsByType[compare];
+  const option =
+    options.find((candidate) => candidate.id === raw.period) ??
+    options[options.length - 1] ??
+    null;
+  const period =
+    option && analysis ? analysis[compare][option.id] ?? null : null;
 
-  if (compare !== "totals") {
-    options = optionsByType[compare];
-    option =
-      options.find((candidate) => candidate.id === raw.period) ??
-      options[options.length - 1] ??
-      null;
-    period = option && analysis ? analysis[compare][option.id] ?? null : null;
-  }
+  const allProjectsAvailable = Boolean(analysis?.unique);
+  const anyComparison = COMPARE_ORDER.some((type) => compareAvailable[type]);
+  const allProjectsForced = allProjectsAvailable && !anyComparison;
+  const allProjects =
+    allProjectsAvailable && (allProjectsForced || raw.all === "1");
 
   return {
     state: {
@@ -205,6 +232,7 @@ export function resolveFilters(
       region,
       compare,
       periodId: option?.id ?? null,
+      allProjects,
     },
     analysis,
     options,
@@ -213,6 +241,16 @@ export function resolveFilters(
     metricAvailable,
     scopeAvailable,
     compareAvailable,
+    allProjectsAvailable,
+    allProjectsForced,
+    reasons: {
+      metric: {
+        revenue: metricReason(session, "revenue", metricAvailable.revenue),
+        cost: metricReason(session, "cost", metricAvailable.cost),
+      },
+      region: "Region-wise analysis is unavailable: no region column was found in this Excel file.",
+      allProjects: `Monthly totals are unavailable: no month columns were found for ${metric}.`,
+    },
   };
 }
 
@@ -223,6 +261,7 @@ export function filtersToParams(state: FilterState): URLSearchParams {
   if (state.region) params.set("region", state.region);
   params.set("compare", state.compare);
   if (state.periodId) params.set("period", state.periodId);
+  if (state.allProjects) params.set("all", "1");
   return params;
 }
 
@@ -233,6 +272,7 @@ export function stateToRaw(state: FilterState): RawFilters {
     region: state.region,
     compare: state.compare,
     period: state.periodId,
+    all: state.allProjects ? "1" : "0",
   };
 }
 
@@ -371,37 +411,55 @@ export function buildBridge(
   };
 }
 
-export interface MoverItem {
-  name: string;
-  change: number;
-  driver: boolean;
+export type TrendRole = "start" | "end" | "other";
+
+export interface TrendBar {
+  month: string;
+  value: number;
+  role: TrendRole;
 }
 
-/** Biggest movers in both directions, drivers always included. */
-export function buildMovers(
-  period: PeriodAnalysis,
-  projectCol: string,
-  perSide = 5,
-): MoverItem[] {
-  const rows = period.rows.map((row) => ({
-    name: String(row[projectCol]),
-    change: toNumber(row.C),
-  }));
-  const sorted = [...rows].sort((a, b) => b.change - a.change);
+export interface TrendModel {
+  bars: TrendBar[];
+  startLabel: string;
+  endLabel: string;
+}
 
-  const drivers = new Set([...period.drivers.top, ...period.drivers.bottom]);
-  const picked = new Map<string, number>();
-  for (const row of [...sorted.slice(0, perSide), ...sorted.slice(-perSide)]) {
-    picked.set(row.name, row.change);
-  }
-  for (const row of sorted) {
-    if (drivers.has(row.name)) picked.set(row.name, row.change);
-  }
+/**
+ * Monthly totals for the current metric and scope, with the two compared
+ * periods flagged so the chart can highlight them. Returns null for
+ * workspaces saved before trend data existed.
+ */
+export function buildTrend(
+  session: DatasetSession,
+  state: FilterState,
+  option: PeriodOption,
+): TrendModel | null {
+  const trend = session.trend;
+  if (!trend) return null;
 
-  return [...picked.entries()]
-    .map(([name, change]) => ({ name, change, driver: drivers.has(name) }))
-    .sort((a, b) => b.change - a.change)
-    .slice(0, 14);
+  const series =
+    state.scope === "region" && state.region
+      ? trend.regions?.[state.region]?.[state.metric]
+      : trend.project?.[state.metric];
+  if (!series || series.months.length === 0) return null;
+
+  const startMonths = new Set(option.start_months ?? []);
+  const endMonths = new Set(option.end_months ?? []);
+
+  return {
+    startLabel: option.start_period ?? "Start",
+    endLabel: option.end_period ?? "End",
+    bars: series.months.map((month, index) => ({
+      month,
+      value: series.values[index] ?? 0,
+      role: startMonths.has(month)
+        ? "start"
+        : endMonths.has(month)
+          ? "end"
+          : "other",
+    })),
+  };
 }
 
 export interface DetailRow {
@@ -435,6 +493,47 @@ export function buildDetailRows(
 }
 
 /* ------------------------------------------------------------------ */
+/* Region column                                                       */
+/* ------------------------------------------------------------------ */
+
+export interface RegionColumn {
+  /** Name of the region column in the user's dataset. */
+  name: string;
+  /** The region the user selected; every row has this value. */
+  value: string;
+}
+
+export function regionColumnFor(
+  session: DatasetSession,
+  state: FilterState,
+): RegionColumn | null {
+  const name = session.mapping.region_col;
+  if (state.scope === "region" && state.region && name) {
+    return { name, value: state.region };
+  }
+  return null;
+}
+
+/** Insert the region column right after the project column (for export). */
+export function withRegionColumn(
+  table: TableResult,
+  projectCol: string,
+  region: RegionColumn | null,
+): TableResult {
+  if (!region || table.columns.includes(region.name)) return table;
+
+  const projectIndex = table.columns.indexOf(projectCol);
+  const insertAt = projectIndex >= 0 ? projectIndex + 1 : 0;
+  const columns = [...table.columns];
+  columns.splice(insertAt, 0, region.name);
+
+  return {
+    columns,
+    rows: table.rows.map((row) => ({ ...row, [region.name]: region.value })),
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Misc                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -453,7 +552,7 @@ export function makeExportFilename(
     workspaceName,
     METRIC_LABEL[state.metric],
     state.scope === "region" && state.region ? state.region : "All projects",
-    state.compare === "totals" ? "Totals" : option?.label ?? "",
+    state.allProjects ? "Monthly totals" : option?.label ?? "",
   ];
   const cleaned = parts
     .filter(Boolean)

@@ -6,7 +6,9 @@ from analysis.quarter_on_quarter import analyze_quarter_on_quarter
 from services.precomputation_service import (
     _analysis_result_to_dict,
     _build_summary,
+    _build_trend,
     _driver_selection,
+    _monthly_totals,
 )
 
 
@@ -70,6 +72,7 @@ def test_summary_counts_projects_months_and_comparisons():
         regions=["IN", "US"],
         periods=periods,
         as_of=date(2026, 10, 10),
+        currency={"code": "USD", "symbol": "$", "detected": False, "mixed": False},
     )
 
     assert summary["unique_projects"] == 6
@@ -80,3 +83,43 @@ def test_summary_counts_projects_months_and_comparisons():
     assert summary["month_count"] == 6
     assert summary["metrics"] == ["revenue"]
     assert summary["comparisons"] == {"mom": 1, "qoq": 2, "yoy": 0}
+    assert summary["currency"]["code"] == "USD"
+
+
+def test_monthly_totals_are_chronological_and_skip_future_months():
+    df = pd.DataFrame(
+        {
+            "Project": ["A", "B"],
+            "Sep 2026": [1, 2],
+            "Aug 2026": [10, 20],
+            "Dec 2026": [100, 200],  # after as_of
+        }
+    )
+    totals = _monthly_totals(df, ["Sep 2026", "Aug 2026", "Dec 2026"], date(2026, 10, 10))
+
+    assert totals == {"months": ["Aug 2026", "Sep 2026"], "values": [30.0, 3.0]}
+    assert _monthly_totals(df, [], date(2026, 10, 10)) is None
+
+
+def test_trend_has_project_wide_and_per_region_series():
+    df = pd.DataFrame(
+        {
+            "Project": ["A", "B", "C"],
+            "Region": ["IN", "IN", "US"],
+            "Jul 2026": [1, 2, 4],
+            "Aug 2026": [10, 20, 40],
+        }
+    )
+    months = ["Jul 2026", "Aug 2026"]
+    trend = _build_trend(df, "Region", ["IN", "US"], months, [], date(2026, 10, 10))
+
+    assert trend["project"]["revenue"]["values"] == [7.0, 70.0]
+    assert trend["project"]["cost"] is None
+    assert trend["regions"]["IN"]["revenue"]["values"] == [3.0, 30.0]
+    assert trend["regions"]["US"]["revenue"]["values"] == [4.0, 40.0]
+
+
+def test_trend_without_a_region_column_has_no_regions():
+    df = pd.DataFrame({"Project": ["A"], "Jul 2026": [1]})
+    trend = _build_trend(df, None, [], ["Jul 2026"], [], date(2026, 10, 10))
+    assert trend["regions"] == {}

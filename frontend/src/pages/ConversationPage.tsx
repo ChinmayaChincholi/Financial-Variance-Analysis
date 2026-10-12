@@ -1,10 +1,9 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check } from "lucide-react";
+import { Check, CircleHelp } from "lucide-react";
 import { AssistantRow, FileChip } from "../components/Messages";
 import { BrandMark, Ring } from "../components/Brand";
 import { Composer } from "../components/Composer";
-import { useElapsed } from "../hooks/useElapsed";
 import { useIngestion } from "../hooks/useIngestion";
 import {
   BACKEND_STAGES,
@@ -15,7 +14,6 @@ import type {
   ClarificationCandidate,
   ClarificationRequest,
 } from "../types/dataset";
-import { formatElapsed } from "../utils/formatting";
 
 /* ------------------------------------------------------------------ */
 /* Idle: attach a file                                                 */
@@ -117,66 +115,72 @@ const STEPS = [
     active: "Computing region-wise analysis",
     done: "Computed region-wise analysis",
   },
-  { active: "Preparing your comparisons", done: "Prepared your comparisons" },
+  { active: "Adding final touches…", done: "Added final touches" },
 ];
+
+interface ChecklistProps {
+  stageIndex: number;
+  details: Record<string, string>;
+  /** True while the app is paused waiting for the user's answers. */
+  waiting?: boolean;
+}
+
+/** The same checklist is used before, during and after the questions. */
+function Checklist({ stageIndex, details, waiting = false }: ChecklistProps) {
+  return (
+    <ol className="steps">
+      {STEPS.map((step, index) => {
+        const state =
+          index < stageIndex
+            ? "done"
+            : index === stageIndex
+              ? waiting
+                ? "waiting"
+                : "active"
+              : "pending";
+        const detail = details[BACKEND_STAGES[index]];
+        return (
+          <li key={step.active} className={`step ${state}`}>
+            {state === "done" && (
+              <Check size={16} className="ok" aria-hidden="true" />
+            )}
+            {state === "active" && <Ring size={18} />}
+            {state === "waiting" && (
+              <CircleHelp size={16} className="wait" aria-hidden="true" />
+            )}
+            {state === "pending" && (
+              <span className="step-dot" aria-hidden="true">
+                ○
+              </span>
+            )}
+            <span>
+              {state === "done" ? step.done : step.active}
+              {state === "done" && detail && (
+                <span className="muted"> {detail}</span>
+              )}
+              {state === "waiting" && (
+                <span className="muted"> · waiting for your answer</span>
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
 
 function Processing() {
   const { cancel } = useIngestion();
-  const phase = useAnalysisStore((state) => state.phase);
   const stageIndex = useAnalysisStore((state) => state.stageIndex);
   const details = useAnalysisStore((state) => state.stageDetails);
-  const startedAt = useAnalysisStore((state) => state.startedAt);
-  const elapsed = useElapsed(startedAt);
-  const resolving = phase === "resolving";
 
   return (
     <AssistantRow icon={<Ring size={28} />}>
       <div className="msg" role="status" aria-live="polite">
-        {resolving ? "Applying your choices…" : "Reading your workbook…"}
+        Reading your workbook…
       </div>
-
-      {resolving ? (
-        <div className="steps">
-          <div className="step">
-            <Ring size={18} />
-            <strong>Computing every comparison</strong>
-          </div>
-        </div>
-      ) : (
-        <ol className="steps">
-          {STEPS.map((step, index) => {
-            const state =
-              index < stageIndex
-                ? "done"
-                : index === stageIndex
-                  ? "active"
-                  : "pending";
-            const detail = details[BACKEND_STAGES[index]];
-            return (
-              <li key={step.active} className={`step ${state}`}>
-                {state === "done" && (
-                  <Check size={16} className="ok" aria-hidden="true" />
-                )}
-                {state === "active" && <Ring size={18} />}
-                {state === "pending" && (
-                  <span className="step-dot" aria-hidden="true">
-                    ○
-                  </span>
-                )}
-                <span>
-                  {state === "done" ? step.done : step.active}
-                  {state === "done" && detail && (
-                    <span className="muted"> {detail}</span>
-                  )}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-
+      <Checklist stageIndex={stageIndex} details={details} />
       <p className="muted small">
-        Elapsed {formatElapsed(elapsed)} ·{" "}
         <button type="button" className="link-button inline" onClick={cancel}>
           Cancel
         </button>
@@ -264,6 +268,8 @@ function OptionDetail({ candidate }: { candidate: ClarificationCandidate }) {
 
 function Questions() {
   const { submit } = useIngestion();
+  const stageIndex = useAnalysisStore((state) => state.stageIndex);
+  const details = useAnalysisStore((state) => state.stageDetails);
   const questions = useAnalysisStore((state) => state.clarifications);
   const choices = useAnalysisStore((state) => state.choices);
   const choose = useAnalysisStore((state) => state.choose);
@@ -283,7 +289,10 @@ function Questions() {
 
   return (
     <AssistantRow>
-      <div className="msg">
+      <div className="msg">Reading your workbook…</div>
+      <Checklist stageIndex={stageIndex} details={details} waiting />
+
+      <div className="msg q-intro">
         {heading} {intro}
       </div>
 

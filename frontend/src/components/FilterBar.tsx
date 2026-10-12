@@ -1,5 +1,6 @@
 import { Dropdown } from "./Dropdown";
 import { Segmented } from "./Segmented";
+import { Switch } from "./Switch";
 import {
   COMPARE_META,
   COMPARE_ORDER,
@@ -39,9 +40,11 @@ export function FilterBar({ resolved, regions, onChange }: FilterBarProps) {
   const isRegion = state.scope === "region";
   let step = 0;
 
-  const unavailable = COMPARE_ORDER.filter(
-    (type) => !resolved.compareAvailable[type],
-  ).map((type) => COMPARE_META[type].unavailable);
+  const unavailable = state.allProjects
+    ? []
+    : COMPARE_ORDER.filter((type) => !resolved.compareAvailable[type]).map(
+        (type) => COMPARE_META[type].unavailable,
+      );
 
   return (
     <>
@@ -55,13 +58,14 @@ export function FilterBar({ resolved, regions, onChange }: FilterBarProps) {
               value: metric,
               label: METRIC_LABEL[metric],
               disabled: !resolved.metricAvailable[metric],
+              tooltip: resolved.reasons.metric[metric],
             }))}
           />
         </Group>
 
-        <Group step={++step} label="Analyse by">
+        <Group step={++step} label="Analyze by">
           <Segmented<Scope>
-            ariaLabel="Analyse by"
+            ariaLabel="Analyze by"
             value={state.scope}
             onChange={(scope) => onChange({ scope })}
             items={[
@@ -70,9 +74,7 @@ export function FilterBar({ resolved, regions, onChange }: FilterBarProps) {
                 value: "region",
                 label: "Region-wise",
                 disabled: !resolved.scopeAvailable.region,
-                title: resolved.scopeAvailable.region
-                  ? undefined
-                  : "No region column was found in this dataset.",
+                tooltip: resolved.reasons.region,
               },
             ]}
           />
@@ -92,37 +94,59 @@ export function FilterBar({ resolved, regions, onChange }: FilterBarProps) {
           </Group>
         )}
 
-        <Group step={++step} label="Compare">
-          <Segmented<CompareType>
-            ariaLabel="Compare"
-            value={state.compare}
-            onChange={(compare) => onChange({ compare, period: null })}
-            items={COMPARE_ORDER.map((type) => ({
-              value: type,
-              label: COMPARE_META[type].short,
-              disabled: !resolved.compareAvailable[type],
-              title: resolved.compareAvailable[type]
-                ? COMPARE_META[type].long
-                : COMPARE_META[type].unavailable,
-            }))}
+        {!state.allProjects && (
+          <Group step={++step} label="Compare">
+            <Segmented<CompareType>
+              ariaLabel="Compare"
+              value={state.compare}
+              onChange={(compare) => onChange({ compare, period: null })}
+              items={COMPARE_ORDER.map((type) => ({
+                value: type,
+                label: COMPARE_META[type].short,
+                disabled: !resolved.compareAvailable[type],
+                tooltip: COMPARE_META[type].unavailable,
+              }))}
+            />
+          </Group>
+        )}
+
+        <Group step={++step} label="All Projects">
+          <Switch
+            ariaLabel="All Projects: show monthly totals for every project"
+            label="Monthly totals"
+            checked={state.allProjects}
+            disabled={!resolved.allProjectsAvailable || resolved.allProjectsForced}
+            tooltip={
+              resolved.allProjectsForced
+                ? "Only monthly totals are available: this data has no complete month, quarter or year to compare."
+                : resolved.reasons.allProjects
+            }
+            onChange={(checked) => onChange({ all: checked ? "1" : "0" })}
           />
         </Group>
 
-        {state.compare !== "totals" && (
+        {!state.allProjects && (
           <Group step={++step} label="Periods" className="filter-periods">
-            <Dropdown
-              ariaLabel="Periods"
-              value={resolved.option?.label ?? "Select"}
-              selectedId={state.periodId}
-              items={resolved.options.map((option) => ({
-                id: option.id,
-                label: option.label,
-              }))}
-              footnote={COMPARE_META[state.compare].footnote}
-              minWidth={220}
-              align="right"
-              onSelect={(period) => onChange({ period })}
-            />
+            {state.compare === "mom" ? (
+              // Month-on-Month always compares one fixed set of months.
+              <div className="period-static" aria-label="Periods">
+                {resolved.option?.label ?? "Not available"}
+              </div>
+            ) : (
+              <Dropdown
+                ariaLabel="Periods"
+                value={resolved.option?.label ?? "Select"}
+                selectedId={state.periodId}
+                items={resolved.options.map((option) => ({
+                  id: option.id,
+                  label: option.label,
+                }))}
+                footnote={COMPARE_META[state.compare].footnote}
+                minWidth={220}
+                align="right"
+                onSelect={(period) => onChange({ period })}
+              />
+            )}
           </Group>
         )}
       </div>

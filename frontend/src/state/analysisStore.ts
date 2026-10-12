@@ -23,7 +23,6 @@ interface ConversationState {
   /** Index (into the UI step list) of the stage the backend is on. */
   stageIndex: number;
   stageDetails: Record<string, string>;
-  startedAt: number | null;
   error: string | null;
 
   begin: (file: File, sheet?: string) => void;
@@ -58,7 +57,6 @@ const initial = {
   choices: {} as Record<string, string>,
   stageIndex: 0,
   stageDetails: {} as Record<string, string>,
-  startedAt: null,
   error: null,
 };
 
@@ -71,7 +69,6 @@ export const useAnalysisStore = create<ConversationState>((set) => ({
       phase: "processing",
       file,
       selectedSheet: sheet ?? null,
-      startedAt: Date.now(),
     }),
 
   progress: (stage, detail) =>
@@ -101,7 +98,8 @@ export const useAnalysisStore = create<ConversationState>((set) => ({
   choose: (field, value) =>
     set((state) => ({ choices: { ...state.choices, [field]: value } })),
 
-  resolving: () => set({ phase: "resolving", startedAt: Date.now() }),
+  // Keeps stageIndex/stageDetails so the checklist resumes where it paused.
+  resolving: () => set({ phase: "resolving" }),
 
   fail: (message) => set({ phase: "error", error: message }),
 

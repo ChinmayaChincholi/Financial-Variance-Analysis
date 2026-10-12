@@ -1,18 +1,20 @@
 import { useMemo, useState } from "react";
 import { Download } from "lucide-react";
-import type { DetailRow } from "../utils/analysisModel";
+import type { CurrencyInfo } from "../types/dataset";
+import type { DetailRow, RegionColumn } from "../utils/analysisModel";
 import {
-  formatSignedUnit,
-  formatUnit,
-  unitCaption,
-  type Unit,
+  currencyCaption,
+  formatMoney,
+  formatSignedMoney,
 } from "../utils/formatting";
 
-interface DetailTableProps {
+interface BreakdownTableProps {
   rows: DetailRow[];
   startLabel: string;
   endLabel: string;
-  unit: Unit;
+  currency: CurrencyInfo;
+  /** Present for region-wise analysis: every row shows the chosen region. */
+  regionColumn: RegionColumn | null;
   exporting: boolean;
   exportError: string | null;
   onExport: () => void;
@@ -20,15 +22,16 @@ interface DetailTableProps {
 
 const COLLAPSED_ROWS = 8;
 
-export function DetailTable({
+export function BreakdownTable({
   rows,
   startLabel,
   endLabel,
-  unit,
+  currency,
+  regionColumn,
   exporting,
   exportError,
   onExport,
-}: DetailTableProps) {
+}: BreakdownTableProps) {
   const [expanded, setExpanded] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -49,10 +52,14 @@ export function DetailTable({
     return [...drivers, ...others].sort((a, b) => b.change - a.change);
   }, [expanded, query, rows]);
 
+  const columnCount = regionColumn ? 5 : 4;
+
   return (
     <div className="card table-card">
       <div className="table-head">
-        <span className="muted">Project detail · {unitCaption(unit)}</span>
+        <span className="muted">
+          Project breakdown · {currencyCaption(currency)}
+        </span>
         <button
           type="button"
           className="btn btn-small"
@@ -73,7 +80,7 @@ export function DetailTable({
         <input
           className="table-search"
           type="search"
-          placeholder={`Search ${rows.length.toLocaleString("en-IN")} projects`}
+          placeholder={`Search ${rows.length.toLocaleString("en-US")} projects`}
           aria-label="Search projects"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -85,6 +92,7 @@ export function DetailTable({
           <thead>
             <tr>
               <th>Project</th>
+              {regionColumn && <th>{regionColumn.name}</th>}
               <th>{startLabel}</th>
               <th>{endLabel}</th>
               <th>Change</th>
@@ -94,16 +102,17 @@ export function DetailTable({
             {visible.map((row) => (
               <tr key={row.name} className={row.driver ? "dr" : undefined}>
                 <td>{row.name}</td>
-                <td>{formatUnit(row.start, unit)}</td>
-                <td>{formatUnit(row.end, unit)}</td>
+                {regionColumn && <td>{regionColumn.value}</td>}
+                <td>{formatMoney(row.start, currency)}</td>
+                <td>{formatMoney(row.end, currency)}</td>
                 <td className={row.change >= 0 ? "up" : "dn"}>
-                  {formatSignedUnit(row.change, unit)}
+                  {formatSignedMoney(row.change, currency)}
                 </td>
               </tr>
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={4} className="empty-cell">
+                <td colSpan={columnCount} className="empty-cell">
                   No projects match your search.
                 </td>
               </tr>
@@ -123,7 +132,7 @@ export function DetailTable({
         >
           {expanded
             ? "Show fewer projects"
-            : `Show all ${rows.length.toLocaleString("en-IN")} projects`}
+            : `Show all ${rows.length.toLocaleString("en-US")} projects`}
         </button>
       )}
     </div>

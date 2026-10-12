@@ -1,15 +1,11 @@
 import { useId } from "react";
+import type { CurrencyInfo } from "../../types/dataset";
 import type { BridgeModel } from "../../utils/analysisModel";
-import {
-  formatSignedUnit,
-  formatUnit,
-  unitCaption,
-  type Unit,
-} from "../../utils/formatting";
+import { formatCompactMoney, scaleCaption } from "../../utils/formatting";
 
 interface BridgeChartProps {
   model: BridgeModel;
-  unit: Unit;
+  currency: CurrencyInfo;
 }
 
 const W = 640;
@@ -59,7 +55,7 @@ interface Bar {
   to: number;
 }
 
-export function BridgeChart({ model, unit }: BridgeChartProps) {
+export function BridgeChart({ model, currency }: BridgeChartProps) {
   const titleId = useId();
 
   // Walk the running level so every delta bar floats from where the last
@@ -101,21 +97,21 @@ export function BridgeChart({ model, unit }: BridgeChartProps) {
 
   const first = model.steps[0];
   const last = model.steps[model.steps.length - 1];
-  const description = `Variance bridge from ${first.label} ${formatUnit(
+  const description = `Variance bridge from ${first.label} ${formatCompactMoney(
     model.start,
-    unit,
-  )} to ${last.label} ${formatUnit(model.end, unit)}, a change of ${formatSignedUnit(
-    model.net,
-    unit,
-  )}.`;
+    currency,
+  )} to ${last.label} ${formatCompactMoney(
+    model.end,
+    currency,
+  )}, a change of ${formatCompactMoney(model.net, currency, true)}.`;
 
   return (
     <div className="card chart-card">
       <div className="chart-head">
-        <span>Variance bridge · {unitCaption(unit)}</span>
+        <span>Variance bridge · {scaleCaption(currency)}</span>
         {axisBroken && (
           <span className="chart-note">
-            Axis starts at {formatUnit(lo, unit)}
+            Axis starts at {formatCompactMoney(lo, currency)}
           </span>
         )}
       </div>
@@ -141,8 +137,8 @@ export function BridgeChart({ model, unit }: BridgeChartProps) {
                 : "c-down";
           const label =
             bar.kind === "total"
-              ? formatUnit(bar.value, unit)
-              : formatSignedUnit(bar.value, unit);
+              ? formatCompactMoney(bar.value, currency)
+              : formatCompactMoney(bar.value, currency, true);
           const lines = wrapLabel(bar.label, maxChars);
           const next = bars[index + 1];
 

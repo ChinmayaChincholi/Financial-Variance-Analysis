@@ -1,15 +1,114 @@
-/**
- * Currency symbol shown next to compact amounts (e.g. "+₹4.82 Cr").
- * Set to "" if the dataset should be shown without a symbol.
- */
-export const CURRENCY_SYMBOL = "₹";
+import type { CurrencyInfo } from "../types/dataset";
 
-const grouped = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 });
-const fixed2 = new Intl.NumberFormat("en-IN", {
+/** Used when a workspace has no detected currency: dollars are assumed. */
+export const DEFAULT_CURRENCY: CurrencyInfo = {
+  code: "USD",
+  symbol: "$",
+  name: "US Dollar",
+  detected: false,
+  mixed: false,
+  found: [],
+  source: "assumed",
+};
+
+const MINUS = "\u2212";
+
+const money = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
+const plain = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+
+/** "$", "€", or "CHF " for code-only currencies; empty when mixed. */
+function prefix(currency: CurrencyInfo): string {
+  const symbol = currency.symbol;
+  if (!symbol) return "";
+  return /^[A-Za-z]+$/.test(symbol) ? `${symbol} ` : symbol;
+}
+
+/** Rounds to cents so values like -0.004 never print as "-$0.00". */
+function cents(value: number): number {
+  return Math.round(Math.abs(value) * 100) / 100;
+}
+
+/** Exact amount: "$1,234.50" or "−$1,234.50". */
+export function formatMoney(value: number, currency: CurrencyInfo): string {
+  const magnitude = cents(value);
+  const sign = value < 0 && magnitude > 0 ? MINUS : "";
+  return `${sign}${prefix(currency)}${money.format(magnitude)}`;
+}
+
+/** Exact amount with an explicit sign: "+$1,234.50" / "−$1,234.50". */
+export function formatSignedMoney(
+  value: number,
+  currency: CurrencyInfo,
+): string {
+  const magnitude = cents(value);
+  const sign = value < 0 && magnitude > 0 ? MINUS : "+";
+  return `${sign}${prefix(currency)}${money.format(magnitude)}`;
+}
+
+/**
+ * Compact amount for chart labels: "$350.50K", "$4.82M", "$1.20B".
+ * Charts only — tables and the sentence always show exact values.
+ */
+export function formatCompactMoney(
+  value: number,
+  currency: CurrencyInfo,
+  signed = false,
+): string {
+  const abs = Math.abs(value);
+  let body: string;
+  if (abs >= 1e9) body = `${prefix(currency)}${(abs / 1e9).toFixed(2)}B`;
+  else if (abs >= 1e6) body = `${prefix(currency)}${(abs / 1e6).toFixed(2)}M`;
+  else if (abs >= 1e3) body = `${prefix(currency)}${(abs / 1e3).toFixed(2)}K`;
+  else body = `${prefix(currency)}${money.format(cents(abs))}`;
+
+  const negative = value < 0 && abs >= 0.005;
+  if (negative) return `${MINUS}${body}`;
+  return signed ? `+${body}` : body;
+}
+
+/** Caption stating what the amounts and compact suffixes mean. */
+export function scaleCaption(currency: CurrencyInfo): string {
+  if (currency.mixed) {
+    return "mixed currencies, not converted · K = thousand, M = million";
+  }
+  return `amounts in ${currency.name} (${currency.symbol}) · K = thousand, M = million`;
+}
+
+/** Short currency description for table captions. */
+export function currencyCaption(currency: CurrencyInfo): string {
+  return currency.mixed
+    ? "mixed currencies, not converted"
+    : `${currency.name} (${currency.symbol})`;
+}
+
+const SENTENCE_AMOUNT =
+  /(net (?:increase|decrease) of )([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)( amount)/;
+
+/**
+ * Tidy only the headline figure in the backend's summary sentence:
+ * currency sign, thousands separators, two decimals, and no minus sign
+ * (the words "increase" / "decrease" already carry the direction).
+ * Everything else in the sentence is left untouched.
+ */
+export function formatSentenceAmount(
+  sentence: string,
+  currency: CurrencyInfo,
+): string {
+  return sentence.replace(
+    SENTENCE_AMOUNT,
+    (match, lead: string, raw: string, tail: string) => {
+      const amount = Number(raw);
+      if (!Number.isFinite(amount)) return match;
+      return `${lead}${formatMoney(Math.abs(amount), currency)}${tail}`;
+    },
+  );
+}
+
+/** Plain grouped number (no currency), e.g. row counts. */
 export function formatNumber(value: unknown): string {
   if (value === null || value === undefined || value === "") {
     return "-";
@@ -18,46 +117,7 @@ export function formatNumber(value: unknown): string {
   if (!Number.isFinite(numericValue)) {
     return String(value);
   }
-  return grouped.format(numericValue);
-}
-
-export interface Unit {
-  divisor: number;
-  label: "" | "L" | "Cr";
-}
-
-/** Pick the Indian unit (lakh / crore) that keeps numbers readable. */
-export function chooseUnit(maxAbs: number): Unit {
-  if (maxAbs >= 1e7) return { divisor: 1e7, label: "Cr" };
-  if (maxAbs >= 1e5) return { divisor: 1e5, label: "L" };
-  return { divisor: 1, label: "" };
-}
-
-/** "₹ Cr", "₹ L" or "₹" — used in chart and table captions. */
-export function unitCaption(unit: Unit): string {
-  return `${CURRENCY_SYMBOL}${unit.label ? ` ${unit.label}` : ""}`.trim();
-}
-
-/** Two-decimal value in the given unit, with Indian digit grouping. */
-export function formatUnit(value: number, unit: Unit): string {
-  return fixed2.format(value / unit.divisor);
-}
-
-const MINUS = "\u2212";
-
-export function formatSignedUnit(value: number, unit: Unit): string {
-  const sign = value < 0 ? MINUS : "+";
-  return `${sign}${fixed2.format(Math.abs(value) / unit.divisor)}`;
-}
-
-/** Headline amount, e.g. "+₹4.82 Cr" or "−₹3.10 Cr". */
-export function formatSignedCompact(value: number): string {
-  const unit = chooseUnit(Math.abs(value));
-  const sign = value < 0 ? MINUS : "+";
-  const suffix = unit.label ? ` ${unit.label}` : "";
-  return `${sign}${CURRENCY_SYMBOL}${fixed2.format(
-    Math.abs(value) / unit.divisor,
-  )}${suffix}`;
+  return plain.format(numericValue);
 }
 
 export function formatBytes(bytes: number | null | undefined): string {
@@ -65,12 +125,6 @@ export function formatBytes(bytes: number | null | undefined): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-export function formatElapsed(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 export function toNumber(value: unknown): number {

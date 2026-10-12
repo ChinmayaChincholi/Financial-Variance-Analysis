@@ -22,6 +22,10 @@ class DatasetSession:
     project_wise: dict[str, Any]
     region_wise: dict[str, Any]
     summary: dict[str, Any] = field(default_factory=dict)
+    trend: dict[str, Any] = field(default_factory=dict)
+    # 2 = adds monthly trend data and detected currency. Workspaces saved by
+    # earlier versions have no "version" key and are treated as legacy.
+    version: int = 2
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -37,4 +41,6 @@ class DatasetSession:
             "projectWise": self.project_wise,
             "regionWise": self.region_wise,
             "summary": self.summary,
+            "trend": self.trend,
+            "version": self.version,
         }

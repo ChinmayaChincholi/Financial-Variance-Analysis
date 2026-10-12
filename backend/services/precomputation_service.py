@@ -28,6 +28,7 @@ from ingestion.period_grouping import (
 )
 from ingestion.schema import IngestionResult
 from models.session import DatasetSession
+from services.currency_detection import coerce_text_amounts, detect_currency
 
 
 def _json_safe_value(value: Any) -> Any:
@@ -154,32 +155,49 @@ def _build_mom_option(months: list[str]) -> dict[str, Any]:
         "label": f"{first} → {third}",
         "start_period": first,
         "end_period": third,
+        "start_months": [first],
+        "end_months": [third],
     }
 
 
 def _build_qoq_option(
         qa_key: tuple[int, int],
         qb_key: tuple[int, int],
+        qa_months: list[str] | None = None,
+        qb_months: list[str] | None = None,
 ) -> dict[str, Any]:
     qa_label = format_fiscal_quarter_label(*qa_key)
     qb_label = format_fiscal_quarter_label(*qb_key)
-    return {
+    option: dict[str, Any] = {
         "id": f"{qa_label}__{qb_label}",
         "label": f"{qa_label} → {qb_label}",
         "start_period": qa_label,
         "end_period": qb_label,
     }
+    if qa_months is not None and qb_months is not None:
+        option["start_months"] = list(qa_months)
+        option["end_months"] = list(qb_months)
+    return option
 
 
-def _build_yoy_option(year_x: int, year_y: int) -> dict[str, Any]:
+def _build_yoy_option(
+        year_x: int,
+        year_y: int,
+        x_months: list[str] | None = None,
+        y_months: list[str] | None = None,
+) -> dict[str, Any]:
     x_label = format_fiscal_year_label(year_x)
     y_label = format_fiscal_year_label(year_y)
-    return {
+    option: dict[str, Any] = {
         "id": f"{x_label}__{y_label}",
         "label": f"{x_label} → {y_label}",
         "start_period": x_label,
         "end_period": y_label,
     }
+    if x_months is not None and y_months is not None:
+        option["start_months"] = list(x_months)
+        option["end_months"] = list(y_months)
+    return option
 
 
 def _build_period_metadata(
@@ -198,7 +216,14 @@ def _build_period_metadata(
         qb_key = _next_quarter_key(*qa_key)
         if qb_key not in complete_quarters:
             continue
-        qoq.append(_build_qoq_option(qa_key, qb_key))
+        qoq.append(
+            _build_qoq_option(
+                qa_key,
+                qb_key,
+                complete_quarters[qa_key],
+                complete_quarters[qb_key],
+            )
+        )
 
     complete_years = _complete_years(month_cols, as_of)
     yoy: list[dict[str, Any]] = []
@@ -206,7 +231,14 @@ def _build_period_metadata(
         year_y = year_x + 1
         if year_y not in complete_years:
             continue
-        yoy.append(_build_yoy_option(year_x, year_y))
+        yoy.append(
+            _build_yoy_option(
+                year_x,
+                year_y,
+                complete_years[year_x],
+                complete_years[year_y],
+            )
+        )
 
     return {"mom": mom, "qoq": qoq, "yoy": yoy}
 
@@ -395,6 +427,45 @@ def _format_month(year: int, month: int) -> str:
     return f"{calendar.month_abbr[month]} {year}"
 
 
+def _monthly_totals(
+        df: pd.DataFrame,
+        month_cols: list[str],
+        as_of: date,
+) -> dict[str, Any] | None:
+    """Total of every available month, oldest first (for the trend chart)."""
+    months = _available_months(month_cols, as_of)
+    if not months:
+        return None
+    numeric = df[months].apply(pd.to_numeric, errors="coerce")
+    totals = numeric.sum(axis=0, skipna=True)
+    return {
+        "months": [str(month) for month in months],
+        "values": [float(totals[month]) for month in months],
+    }
+
+
+def _build_trend(
+        df: pd.DataFrame,
+        region_col: str | None,
+        regions: list[str],
+        revenue_cols: list[str],
+        cost_cols: list[str],
+        as_of: date,
+) -> dict[str, Any]:
+    def both(frame: pd.DataFrame) -> dict[str, Any]:
+        return {
+            "revenue": _monthly_totals(frame, revenue_cols, as_of),
+            "cost": _monthly_totals(frame, cost_cols, as_of),
+        }
+
+    trend: dict[str, Any] = {"project": both(df), "regions": {}}
+    if region_col is not None:
+        for region in regions:
+            filtered = df[df[region_col].astype(str) == region]
+            trend["regions"][region] = both(filtered)
+    return trend
+
+
 def _build_summary(
         df: pd.DataFrame,
         project_col: str,
@@ -403,6 +474,7 @@ def _build_summary(
         regions: list[str],
         periods: dict[str, Any],
         as_of: date,
+        currency: dict[str, Any],
 ) -> dict[str, Any]:
     """
     The small dataset overview shown when the analysis is complete.
@@ -442,6 +514,7 @@ def _build_summary(
             "qoq": comparison_count("qoq"),
             "yoy": comparison_count("yoy"),
         },
+        "currency": currency,
     }
 
 
@@ -481,6 +554,16 @@ def precompute_dataset(
 
     as_of = date.today()
 
+    # Currency is read from the month-year headers/values first, then any
+    # text amounts (e.g. "$1,200.50") are converted to real numbers.
+    amount_columns = list(
+        dict.fromkeys(
+            mapping.revenue_month_year_cols + mapping.cost_month_year_cols
+        )
+    )
+    currency = detect_currency(df, amount_columns)
+    df = coerce_text_amounts(df, amount_columns)
+
     periods = {
         "revenue": _build_period_metadata(mapping.revenue_month_year_cols, as_of),
         "cost": _build_period_metadata(mapping.cost_month_year_cols, as_of),
@@ -515,6 +598,15 @@ def precompute_dataset(
     elif progress_callback is not None:
         progress_callback("Computing region-wise analysis")
 
+    trend = _build_trend(
+        df=df,
+        region_col=mapping.region_col,
+        regions=regions,
+        revenue_cols=mapping.revenue_month_year_cols,
+        cost_cols=mapping.cost_month_year_cols,
+        as_of=as_of,
+    )
+
     summary = _build_summary(
         df=df,
         project_col=mapping.project_col,
@@ -523,6 +615,7 @@ def precompute_dataset(
         regions=regions,
         periods=periods,
         as_of=as_of,
+        currency=currency,
     )
 
     return DatasetSession(
@@ -536,4 +629,5 @@ def precompute_dataset(
         project_wise=project_wise,
         region_wise=region_wise,
         summary=summary,
+        trend=trend,
     )
