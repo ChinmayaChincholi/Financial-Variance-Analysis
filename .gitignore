@@ -138,3 +138,5 @@ pnpm-debug.log*
 # ============================================================
 
 *.tsbuildinfo
+
+installer_output/

@@ -18,6 +18,12 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+if getattr(sys, "frozen", False):  # running as a packaged app
+    os.environ.setdefault(
+        "VARIANCE_STUDIO_FRONTEND_DIR",
+        str(Path(sys._MEIPASS) / "frontend_dist"),
+    )
+
 import uvicorn  # noqa: E402
 
 from api.app import _frontend_dist_dir, app  # noqa: E402
