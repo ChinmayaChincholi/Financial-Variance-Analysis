@@ -9,21 +9,18 @@ services:
     branch: web-demo
     autoDeploy: true
     healthCheckPath: /api/health
-    # Large workbooks need memory: a 30 MB file used about 560 MB for a single
-    # upload in testing. Choose a plan with roughly 2 GB of RAM (check the
-    # memory of each plan on Render's pricing page before choosing).
-    plan: standard
+    # Free tier: sleeps after 15 minutes idle, data is erased on every
+    # restart/redeploy, and memory is limited, so keep demo files small.
+    plan: free
     envVars:
       - key: VARIANCE_STUDIO_MODE
         value: web
+      # Keep uploads small and process one at a time on the free tier.
+      - key: VARIANCE_STUDIO_MAX_UPLOAD_MB
+        value: "10"
+      - key: VARIANCE_STUDIO_MAX_CONCURRENT_JOBS
+        value: "1"
       # Optional limits (these are the defaults):
-      # - key: VARIANCE_STUDIO_MAX_UPLOAD_MB
-      #   value: "50"
       # - key: VARIANCE_STUDIO_RETENTION_HOURS
       #   value: "24"
-    # Uncomment to keep demo workspaces across restarts and redeploys (the
-    # container's own disk is erased on every deploy). Needs a paid plan.
-    # disk:
-    #   name: variance-data
-    #   mountPath: /data
-    #   sizeGB: 1
+    # Persistent disks are not available on the free plan, so none is used.
