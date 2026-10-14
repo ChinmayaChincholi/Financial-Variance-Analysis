@@ -4,6 +4,8 @@ import { Check, CircleHelp } from "lucide-react";
 import { AssistantRow, FileChip } from "../components/Messages";
 import { BrandMark, Ring } from "../components/Brand";
 import { Composer } from "../components/Composer";
+import { IS_WEB } from "../config/appMode";
+import { useDemoConfig } from "../hooks/useDemoConfig";
 import { useIngestion } from "../hooks/useIngestion";
 import {
   BACKEND_STAGES,
@@ -25,6 +27,7 @@ function Landing() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const demoConfig = useDemoConfig();
 
   function accept(file: File | undefined) {
     if (file) setError(attach(file));
@@ -55,7 +58,13 @@ function Landing() {
         }}
       >
         <div className="dz-title">Drop an Excel file here</div>
-        <p className="muted">.xlsx or .xls · processed entirely offline</p>
+        <p className="muted">
+          {IS_WEB
+            ? `.xlsx or .xls · analysed on the demo server${
+                demoConfig ? ` · up to ${demoConfig.max_upload_mb} MB` : ""
+              }`
+            : ".xlsx or .xls · processed entirely offline"}
+        </p>
         <button
           type="button"
           className="btn"

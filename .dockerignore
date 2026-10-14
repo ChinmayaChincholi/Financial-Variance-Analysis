@@ -1,0 +1,26 @@
+.git
+.gitignore
+.vscode
+.idea
+
+# Rebuilt inside the image
+frontend/node_modules
+frontend/dist
+frontend/.vite
+
+# Never ship local environments, caches or data
+backend/venv
+backend/.venv
+backend/env
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.env
+.env.*
+data
+local_data
+uploads
+exports
+tmp
+temp
+*.log

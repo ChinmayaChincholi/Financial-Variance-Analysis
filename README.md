@@ -61,3 +61,67 @@ python -m pytest
 ## Settings
 
 - `VARIANCE_STUDIO_PORT` changes the port used by `run.py` (default `8000`).
+
+## Web demo edition (hosted)
+
+The same code can run as a website, so a client can try the application from a link without installing anything. This is an additional way to run Variance Studio; the offline desktop application above is unchanged and remains the core product.
+
+Web mode is switched on with `VARIANCE_STUDIO_MODE=web` (the default is `desktop`). It adds:
+
+- **Private workspaces per browser.** Each browser gets an anonymous random cookie and its own storage, so visitors never see each other's data. There are no accounts or sign-in.
+- **Limits.** Upload size cap, a cap on simultaneous processing, a cap on saved workspaces per visitor, and automatic deletion of data after a period of inactivity.
+- **Web hardening.** Security headers, cache headers, compression (never on the live progress stream), and the API docs switched off.
+- **A clear notice.** A banner reminds visitors not to upload confidential data.
+
+### Run the web edition locally
+
+Build the interface in web mode, then start the backend in web mode.
+
+Windows PowerShell:
+
+```powershell
+cd frontend
+$env:VITE_APP_MODE = "web"
+npm run build
+
+cd ..\backend
+$env:VARIANCE_STUDIO_MODE = "web"
+python -m uvicorn api.app:app
+```
+
+macOS / Linux:
+
+```bash
+cd frontend
+VITE_APP_MODE=web npm run build
+
+cd ../backend
+VARIANCE_STUDIO_MODE=web python -m uvicorn api.app:app
+```
+
+Then open `http://127.0.0.1:8000`. Rebuild without `VITE_APP_MODE` (and start without `VARIANCE_STUDIO_MODE`) to return to the desktop edition.
+
+### Deploy
+
+The `Dockerfile` builds the interface in web mode and runs the API with it in one container (`render.yaml` is a ready-made Render blueprint; any host that runs Docker works). Run a single instance: storage is SQLite and the processing limit is counted in-process.
+
+```bash
+docker build -t variance-studio-web .
+docker run -p 8000:8000 -v variance-data:/data variance-studio-web
+```
+
+Mounting a volume at `/data` keeps demo workspaces across restarts; without one they are lost whenever the container is replaced.
+
+**Memory.** Analysing a workbook loads all of it into memory. In testing, a 30 MB workbook (85,000 rows) took about 13 seconds and roughly 560 MB for a single upload. Size the server for the largest file you expect times `VARIANCE_STUDIO_MAX_CONCURRENT_JOBS` (default 2), with headroom: 2 GB of RAM is a comfortable starting point for files in the tens of megabytes. Lower the upload limit or the concurrency if the server has less.
+
+### Web settings
+
+| Variable                             | Default | Meaning                                            |
+| ------------------------------------ | ------- | -------------------------------------------------- |
+| `VARIANCE_STUDIO_MODE`               | desktop | `web` enables the web edition                      |
+| `VARIANCE_STUDIO_MAX_UPLOAD_MB`      | 50      | Largest Excel file a visitor may upload            |
+| `VARIANCE_STUDIO_RETENTION_HOURS`    | 24      | Visitor data is deleted after this much inactivity |
+| `VARIANCE_STUDIO_MAX_WORKSPACES`     | 10      | Saved analyses kept per visitor                    |
+| `VARIANCE_STUDIO_MAX_CONCURRENT_JOBS`| 2       | Uploads processed at the same time                 |
+| `VARIANCE_STUDIO_DATA_DIR`           | (OS)    | Where visitor data is stored (`/data` in Docker)   |
+| `PORT`                               | 8000    | Port used by the Docker image                      |

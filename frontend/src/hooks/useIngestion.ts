@@ -6,6 +6,7 @@ import {
   submitClarifications,
 } from "../services/ingestionController";
 import { useAnalysisStore } from "../state/analysisStore";
+import { getCachedDemoConfig } from "./useDemoConfig";
 import type { WorkspaceMeta } from "../types/dataset";
 
 export function validateExcelFile(file: File): string | null {
@@ -13,6 +14,15 @@ export function validateExcelFile(file: File): string | null {
   if (extension !== "xlsx" && extension !== "xls") {
     return "Please attach an Excel file (.xlsx or .xls).";
   }
+
+  // Only the web demo has an upload limit (the server enforces it too; this
+  // just explains it before a large file is sent).
+  const limitMb = getCachedDemoConfig()?.max_upload_mb;
+  if (limitMb && file.size > limitMb * 1024 * 1024) {
+    const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+    return `That file is ${sizeMb} MB. The web demo accepts files up to ${limitMb} MB; use the desktop application for larger datasets.`;
+  }
+
   return null;
 }
 

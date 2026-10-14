@@ -1,0 +1,40 @@
+/* Styles used only by the hosted web demo. */
+
+/* The page is a column: banner on top, the normal app below it. */
+.web-frame {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.web-frame > .app {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.demo-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: none;
+  padding: 8px 16px;
+  background: var(--driver-bg);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.demo-banner svg {
+  flex: none;
+  color: var(--pill-fg);
+}
+
+.demo-banner strong {
+  color: var(--text);
+  font-weight: 600;
+}

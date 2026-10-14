@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { IS_WEB } from "../config/appMode";
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -32,8 +33,9 @@ export class ErrorBoundary extends Component<
         <div className="card fatal-card">
           <h1 className="display">Something went wrong</h1>
           <p className="muted">
-            The application hit an unexpected problem. Your saved workspaces
-            are safe on this computer.
+            {IS_WEB
+              ? "The application hit an unexpected problem. Reloading usually fixes it."
+              : "The application hit an unexpected problem. Your saved workspaces are safe on this computer."}
           </p>
           <pre className="fatal-detail">{this.state.error.message}</pre>
           <button

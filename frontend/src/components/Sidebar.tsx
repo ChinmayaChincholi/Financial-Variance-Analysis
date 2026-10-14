@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, useMatch, useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { BrandMark } from "./Brand";
+import { IS_WEB } from "../config/appMode";
 import { useAnalysisStore } from "../state/analysisStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { cancelIngestion } from "../services/ingestionController";
@@ -105,7 +106,9 @@ export function Sidebar() {
         {deleteError && <p className="sb-error">{deleteError}</p>}
       </nav>
 
-      <span className="pill sb-offline">Offline · stays on this PC</span>
+      <span className="pill sb-offline">
+        {IS_WEB ? "Web demo · temporary" : "Offline · stays on this PC"}
+      </span>
     </aside>
   );
 }

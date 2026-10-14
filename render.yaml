@@ -1,0 +1,29 @@
+# Render Blueprint for the hosted web demo. Optional: any host that can run
+# the Dockerfile works. The offline desktop application does not use this.
+services:
+  - type: web
+    name: variance-studio-demo
+    runtime: docker
+    # Deploys only from the web branch, so work on main never changes the
+    # client's link.
+    branch: web-demo
+    autoDeploy: true
+    healthCheckPath: /api/health
+    # Large workbooks need memory: a 30 MB file used about 560 MB for a single
+    # upload in testing. Choose a plan with roughly 2 GB of RAM (check the
+    # memory of each plan on Render's pricing page before choosing).
+    plan: standard
+    envVars:
+      - key: VARIANCE_STUDIO_MODE
+        value: web
+      # Optional limits (these are the defaults):
+      # - key: VARIANCE_STUDIO_MAX_UPLOAD_MB
+      #   value: "50"
+      # - key: VARIANCE_STUDIO_RETENTION_HOURS
+      #   value: "24"
+    # Uncomment to keep demo workspaces across restarts and redeploys (the
+    # container's own disk is erased on every deploy). Needs a paid plan.
+    # disk:
+    #   name: variance-data
+    #   mountPath: /data
+    #   sizeGB: 1

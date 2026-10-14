@@ -4,6 +4,11 @@ FastAPI application entry point.
 In development the React app runs on Vite (port 5173) and proxies /api here.
 In the packaged, fully offline setup this same server also serves the built
 frontend from frontend/dist, so one process is the entire application.
+
+The same code can also run as a hosted web demo. Set
+VARIANCE_STUDIO_MODE=web to enable the web-only behaviour in the web_demo
+package (per-visitor private workspaces, upload limits, security headers).
+The default mode, "desktop", is unchanged.
 """
 
 import os
@@ -17,6 +22,7 @@ from api.routes.dataset_routes import router as dataset_router
 from api.routes.export_routes import router as export_router
 from api.routes.health_routes import router as health_router
 from api.routes.workspace_routes import router as workspace_router
+from web_demo.settings import is_web_mode
 
 FRONTEND_DIR_ENV = "VARIANCE_STUDIO_FRONTEND_DIR"
 
@@ -53,9 +59,27 @@ def _mount_frontend(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
+    web_mode = is_web_mode()
+
+    options: dict = {}
+    if web_mode:
+        # Imported only in web mode, so the desktop application never loads
+        # the rest of the web-demo code.
+        from web_demo.setup import configure_web_app, web_lifespan
+
+        options = {
+            "lifespan": web_lifespan,
+            # The interactive API docs are a development aid, not something
+            # to expose on the public site.
+            "docs_url": None,
+            "redoc_url": None,
+            "openapi_url": None,
+        }
+
     app = FastAPI(
         title="Financial Revenue & Cost Analysis API",
         version="2.0.0",
+        **options,
     )
 
     app.add_middleware(
@@ -73,6 +97,10 @@ def create_app() -> FastAPI:
     app.include_router(dataset_router)
     app.include_router(workspace_router)
     app.include_router(export_router)
+
+    if web_mode:
+        # Before the frontend catch-all below, so /api/demo/* is not shadowed.
+        configure_web_app(app)
 
     # Must be registered last so it never shadows an API route.
     _mount_frontend(app)
